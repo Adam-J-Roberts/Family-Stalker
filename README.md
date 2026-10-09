@@ -4,9 +4,9 @@ An iOS-first, self-hosted household location-sharing project, with Android plann
 
 ## Status
 
-The server-setup milestone provides a persistent PostgreSQL database, first-run website, administrator login, encrypted SMTP configuration, email invitations/verification, member revocation, and Docker packaging. See [deployment instructions](deploy/README.md) and [setup acceptance checks](docs/server-setup.md).
+The server provides setup/admin and household-map web UIs, invitations, trusted-device enrollment, encrypted data receiving/storage, history, saved places/profiles, and generic APNs/FCM push routing. GPS and event history default to **14 days**; current saved places/profiles persist until changed or deleted.
 
-There is no mobile app, map, device pairing, or location service yet. Household end-to-end encryption remains a requirement awaiting implementation and review; location APIs are disabled.
+See [deployment](deploy/README.md) and the [server/client protocol and security limits](docs/server-protocol.md). The reference browser generates and stores its own encrypted device keys; Docker cannot collect GPS itself. **Native iOS/Android background-tracking clients are not implemented yet.** This is a runnable prototype, with synthetic tests, not an independently audited production security claim.
 
 ## Intended experience
 

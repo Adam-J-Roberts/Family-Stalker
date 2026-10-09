@@ -1,5 +1,7 @@
 # Security model (draft)
 
+For the implemented server/browser prototype, read [protocol and explicit limits](server-protocol.md). The browser cannot meet the actively malicious-server target while using JavaScript delivered by that server. Native clients and independent review remain prerequisites for that stronger claim.
+
 ## Target claim
 
 A network observer or attacker who obtains the server database should not be able to decrypt location contents. An actively malicious server should not be able to silently enroll a new decrypting device. These are requirements to validate, not current guarantees.

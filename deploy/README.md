@@ -1,6 +1,6 @@
 # Deployment
 
-This image runs the persistent setup website and account/email services. Compose also runs PostgreSQL; both services use durable volumes. Location sharing and mobile clients are not implemented.
+This image runs the persistent setup website and account/email services. Compose also runs PostgreSQL; both services use durable volumes. It also serves the encrypted browser map and data relay. Native mobile background-tracking clients are not implemented.
 
 ## Publishing
 
@@ -44,7 +44,7 @@ For isolated LAN testing only, use `--url http://<NJServer-LAN-IP>:8186 --bind <
 3. Enter the token, household name, owner email/username and a password of at least 15 characters. Setup closes permanently and the token file is removed.
 4. Sign in. Configure your provider's SMTP hostname, port, TLS/STARTTLS, username, password and sender. Save, send a test to yourself, then confirm the administrator email.
 5. Invite a test member. Their email link lets them choose credentials and verify ownership. Alternatively, the sign-in page lets them request a fresh link using their invited email. Uninvited emails never create accounts.
-6. Run the [acceptance checklist](../docs/server-setup.md), including revocation and restart persistence. Email confirmation grants no encrypted device access; pairing is still gated.
+6. Run the [acceptance checklist](../docs/server-setup.md), including revocation and restart persistence. Email confirmation grants no encrypted device access. Open Household map, create the browser vault, then retrieve `docker compose exec stalker python manage.py device-bootstrap-token` to approve the first device. Invite another test browser, compare its fingerprint and the household root through a separate trusted channel, then approve it from the existing device.
 
 SMTP credentials and queued email bodies are encrypted with `/data/server.key`. Protect Docker access and backups: a host operator with both database and key can decrypt them. Provider app passwords may be required. The setup does not request Apple/Google push secrets until their services exist.
 
@@ -106,3 +106,15 @@ STALKER_PUBLIC_URL=https://stalker.example.invalid STALKER_DB_PASSWORD=synthetic
 ```
 
 For actual deployment use `prepare.py` to generate unique secrets. Never reuse the synthetic example password.
+
+## Full-server acceptance
+
+Read [server protocol](../docs/server-protocol.md) before real location use. Add an approved second browser, publish **synthetic** locations from the first, and verify both display the decrypted update. A pending browser must not read it. Test saved places, profiles, history, pause/resume, and member/device revocation. New devices receive future updates; use the reshare-places button after approval. A member revoked through account administration must also be removed from the signed roster through the map's reconciliation button before further publication.
+
+In Server settings, history defaults to 14 days and can be reduced. Place/profile state persists. The cleanup button and `docker compose exec stalker python manage.py cleanup` trigger expiry processing. `STALKER_STORAGE_QUOTA_MIB` optionally sets the ciphertext budget (default 512); total PostgreSQL usage includes indexes/WAL and may be larger. Keep backups on their own 14-day expiry policy if you want that cap for all retained GPS copies.
+
+Optional APNs configuration needs your Apple developer team/key IDs, .p8 key, native bundle ID and sandbox/production selection. Optional FCM needs a Firebase service-account JSON. These are encrypted at rest and never returned in settings responses. Neither provider receives readable GPS/place data. Real delivery needs a native app with a registered token; the browser's encrypted event test validates server flow without pretending to be native push.
+
+Schema 1→2 is an additive migration under the initial version guard; it preserves accounts/mail settings and creates the relay/device tables. Back up both volumes before upgrading. Older images cannot run against schema 2; restore their matching database backup to roll back. Schema migration supports a single application worker/replica only.
+
+If every trusted device is lost, first seek approval from another trusted household device. Otherwise the local `reset-encryption` command requires typed destructive confirmation, deletes all encrypted data/device state, and starts a new household cryptographic identity. It preserves account/mail administration and cannot recover past locations. Run it only after a backup, with no concurrent browser/client activity; this is a last-resort local recovery tool, not email recovery.

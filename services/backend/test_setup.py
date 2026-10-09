@@ -266,12 +266,12 @@ class SetupTests(unittest.TestCase):
             self.assertEqual(item.payload, "")
             self.assertEqual(item.status, "sent")
 
-    def test_locations_and_pairing_are_not_exposed(self):
+    def test_plaintext_location_endpoints_are_not_exposed(self):
         self.setup_owner()
         for path in ("/api/locations", "/locations", "/api/devices/approve"):
             self.assertEqual(self.client.post(path, json={"location": "synthetic"}).status_code, 404)
         self.login()
-        self.assertFalse(self.client.get("/api/devices").json()["pairing_available"])
+        self.assertTrue(self.client.get("/api/devices").json()["pairing_available"])
 
     def test_setup_ui_and_security_headers(self):
         for path in ("/", "/app.js", "/style.css"):

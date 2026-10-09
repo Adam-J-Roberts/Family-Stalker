@@ -6,7 +6,7 @@ Requirements, component boundaries, security draft, folder ownership, and collab
 
 ## Server setup — prerequisite milestone
 
-Persistent Docker/PostgreSQL, first-run website, owner login, SMTP, pending invitations, verification and member revocation. See [scope and acceptance](server-setup.md). This work comes before the encryption spike; it does not enable location or pairing.
+Persistent Docker/PostgreSQL, first-run website, owner login, SMTP, pending invitations, verification and member revocation. See [scope and acceptance](server-setup.md). The subsequent [full-server prototype](server-protocol.md) adds encrypted relay, signed pairing, browser map, retention and optional push providers. Native iOS milestones and production review remain outstanding.
 
 ## 1 — Encryption and two-device pairing spike
 

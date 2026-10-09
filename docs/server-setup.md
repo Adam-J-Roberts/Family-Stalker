@@ -1,4 +1,6 @@
-# Server setup: scope and acceptance
+# Server setup: original milestone acceptance
+
+The full-server extension supersedes the original gating section below: see [current protocol/scope](server-protocol.md).
 
 This milestone implements the server prerequisites and onboarding web experience. It does not claim to implement the full location-sharing product.
 

@@ -25,7 +25,7 @@ from sqlalchemy import Boolean, Float, Integer, String, Text, create_engine, sel
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 HASHER = PasswordHasher(time_cost=2, memory_cost=19456, parallelism=1)
 DUMMY_HASH = HASHER.hash(secrets.token_urlsafe(32))
 
@@ -111,6 +111,7 @@ class SetupInput(Input):
 class LoginInput(Input):
     email: str = Field(max_length=254)
     password: str = Field(max_length=128)
+    native: bool = False
 
 
 class EmailInput(Input):
@@ -160,7 +161,8 @@ def secret_file(path, generator):
     return value
 
 
-def create_app(database_url=None, data_dir=None, public_url=None, allow_http=None, mailer=None, mail_worker=True):
+def create_app(database_url=None, data_dir=None, public_url=None, allow_http=None, mailer=None, mail_worker=True, notifier=None):
+    from data_service import ServiceState, initialize_service, install, revoke_account_data
     database_url = database_url or os.environ["DATABASE_URL"]
     directory = Path(data_dir or os.environ.get("STALKER_DATA_DIR", "/data"))
     public_url = (public_url or os.environ["STALKER_PUBLIC_URL"]).rstrip("/")
@@ -172,6 +174,11 @@ def create_app(database_url=None, data_dir=None, public_url=None, allow_http=Non
         raise ValueError("STALKER_PUBLIC_URL must be an HTTPS origin (HTTP requires explicit development opt-in)")
     directory.mkdir(parents=True, exist_ok=True, mode=0o700)
     engine = create_engine(database_url, pool_pre_ping=True)
+    if engine.dialect.name == "sqlite":
+        from sqlalchemy import event
+        @event.listens_for(engine, "connect")
+        def foreign_keys(connection, record):
+            connection.execute("PRAGMA foreign_keys=ON")
     key_file = directory / "server.key"
     # An existing schema must never silently get a replacement encryption key.
     from sqlalchemy import inspect
@@ -181,7 +188,14 @@ def create_app(database_url=None, data_dir=None, public_url=None, allow_http=Non
     bootstrap_file = directory / "bootstrap-token"
 
     def initialize():
-        Base.metadata.create_all(engine)
+        from sqlalchemy import inspect, text
+        with engine.begin() as connection:
+            old = connection.execute(text("SELECT version FROM settings WHERE id=1")).scalar() if inspect(connection).has_table("settings") else None
+            if old not in (None, 1, SCHEMA_VERSION):
+                raise RuntimeError("Unsupported database version; apply a reviewed migration")
+            Base.metadata.create_all(connection)
+            if old == 1:
+                connection.execute(text("UPDATE settings SET version=2 WHERE id=1"))
         with Session(engine) as db:
             settings = db.get(Settings, 1)
             if settings is None:
@@ -200,6 +214,11 @@ def create_app(database_url=None, data_dir=None, public_url=None, allow_http=Non
                 except InvalidToken:
                     raise RuntimeError("Server key does not match stored credentials; restore the matching server data volume") from None
 
+        try:
+            initialize_service(engine, directory, cipher)
+        except InvalidToken:
+            raise RuntimeError("Server key does not match stored credentials; restore matching server data") from None
+
     @asynccontextmanager
     async def lifespan(app):
         initialize()
@@ -208,6 +227,7 @@ def create_app(database_url=None, data_dir=None, public_url=None, allow_http=Non
                 await asyncio.sleep(5)
                 try:
                     await asyncio.to_thread(worker_batch)
+                    await asyncio.to_thread(app.state.maintenance)
                 except (SQLAlchemyError, OSError, smtplib.SMTPException):
                     # Do not log provider exceptions, addresses or credentials.
                     pass
@@ -230,12 +250,15 @@ def create_app(database_url=None, data_dir=None, public_url=None, allow_http=Non
             if request.headers.get("host", "").lower() != url.netloc.lower():
                 return JSONResponse({"detail": "Unrecognized server address"}, 400)
             if request.method not in ("GET", "HEAD", "OPTIONS"):
-                if request.headers.get("origin") != public_url:
+                origin = request.headers.get("origin")
+                native = request.headers.get("authorization", "").startswith("Bearer ") or (request.headers.get("x-stalker-client") == "native" and request.url.path in ("/api/login", "/api/enrollment/request", "/api/enrollment/verify"))
+                if origin != public_url and not (origin is None and native):
                     return JSONResponse({"detail": "Origin rejected"}, 403)
                 length = request.headers.get("content-length", "")
-                if not length.isdecimal() or int(length) > 8192:
+                maximum = 1048576 if request.url.path == "/api/records" else 32768 if request.url.path == "/api/push/config" else 16384 if request.url.path == "/api/roster" else 8192
+                if not length.isdecimal() or int(length) > maximum:
                     return JSONResponse({"detail": "Request size rejected"}, 413)
-                if len(await request.body()) > 8192:
+                if len(await request.body()) > maximum:
                     return JSONResponse({"detail": "Request size rejected"}, 413)
                 if not request.headers.get("content-type", "").startswith("application/json"):
                     return JSONResponse({"detail": "JSON required"}, 415)
@@ -243,7 +266,7 @@ def create_app(database_url=None, data_dir=None, public_url=None, allow_http=Non
         response.headers["Cache-Control"] = "no-store"
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "no-referrer"
-        response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
+        response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://tile.openstreetmap.org; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
         if url.scheme == "https":
             response.headers["Strict-Transport-Security"] = "max-age=31536000"
         return response
@@ -278,13 +301,15 @@ def create_app(database_url=None, data_dir=None, public_url=None, allow_http=Non
             db.commit()
 
     def current(request: Request, db: Session = Depends(database)):
-        session = db.get(LoginSession, digest(request.cookies.get("stalker_session", "")))
+        bearer = request.headers.get("authorization", "")
+        token = bearer[7:] if bearer.startswith("Bearer ") else request.cookies.get("stalker_session", "")
+        session = db.get(LoginSession, digest(token))
         if not session or session.expires <= time.time():
             raise HTTPException(401, "Sign in required")
         account = db.get(Account, session.account_id)
         if not account or account.status != "active":
             raise HTTPException(401, "Sign in required")
-        if request.method not in ("GET", "HEAD") and not hmac.compare_digest(request.headers.get("x-csrf-token", ""), session.csrf):
+        if not bearer.startswith("Bearer ") and request.method not in ("GET", "HEAD") and not hmac.compare_digest(request.headers.get("x-csrf-token", ""), session.csrf):
             raise HTTPException(403, "Session confirmation required")
         return account, session
 
@@ -358,7 +383,7 @@ def create_app(database_url=None, data_dir=None, public_url=None, allow_http=Non
     @app.get("/api/setup")
     def setup_status(db: Session = Depends(database)):
         return {"configured": bool(db.get(Settings, 1).household), "public_url": public_url,
-                "location_service": "not_implemented"}
+                "location_service": "encrypted_relay"}
 
     @app.post("/api/setup", status_code=201)
     def setup(body: SetupInput, request: Request, db: Session = Depends(database)):
@@ -393,7 +418,7 @@ def create_app(database_url=None, data_dir=None, public_url=None, allow_http=Non
         db.add(LoginSession(id=digest(token), account_id=account.id, csrf=csrf, expires=time.time() + 43200))
         db.commit()
         response.set_cookie("stalker_session", token, httponly=True, secure=url.scheme == "https", samesite="strict", max_age=43200, path="/")
-        return {"csrf": csrf}
+        return {"csrf": csrf, **({"access_token": token, "expires_in": 43200} if body.native else {})}
 
     @app.get("/api/session")
     def session(auth=Depends(current)):
@@ -411,7 +436,7 @@ def create_app(database_url=None, data_dir=None, public_url=None, allow_http=Non
     def dashboard(auth=Depends(admin), db: Session = Depends(database)):
         settings = db.get(Settings, 1)
         return {"household": settings.household, "public_url": public_url, "mail_configured": bool(settings.smtp),
-                "mail_tested": settings.mail_tested, "location_service": "not_implemented", "device_pairing": "not_implemented",
+                "mail_tested": settings.mail_tested, "location_service": "encrypted_relay", "device_pairing": "signed_roster",
                 "pending_mail": db.query(Outbox).filter_by(status="pending").count()}
 
     @app.get("/api/mail")
@@ -505,11 +530,13 @@ def create_app(database_url=None, data_dir=None, public_url=None, allow_http=Non
 
     @app.post("/api/accounts/{account_id}/revoke")
     def revoke(account_id: str, auth=Depends(admin), db: Session = Depends(database)):
+        db.execute(select(ServiceState).where(ServiceState.id == 1).with_for_update()).scalar_one()
         account = db.get(Account, account_id)
         if not account:
             raise HTTPException(404, "Account not found")
         if account.role == "admin":
             raise HTTPException(409, "Owner revocation is not supported")
+        revoke_account_data(db, account_id)
         account.status = "revoked"
         db.query(LoginSession).filter_by(account_id=account_id).delete()
         db.query(Challenge).filter_by(account_id=account_id).delete()
@@ -518,9 +545,9 @@ def create_app(database_url=None, data_dir=None, public_url=None, allow_http=Non
         db.commit()
         return {"revoked": True}
 
-    @app.get("/api/devices")
-    def devices(auth=Depends(admin), db: Session = Depends(database)):
-        return {"pairing_available": False, "devices": [{"id": d.id, "account_id": d.account_id, "status": d.status} for d in db.scalars(select(Device))]}
+    install(app, engine, directory, cipher, database, current, admin, rate, notifier)
+    from push_service import install_push
+    install_push(app, cipher, database, admin, notifier)
 
     assets = Path(__file__).parent / "static"
 
@@ -535,5 +562,19 @@ def create_app(database_url=None, data_dir=None, public_url=None, allow_http=Non
     @app.get("/style.css")
     def stylesheet():
         return FileResponse(assets / "style.css", media_type="text/css")
+
+    @app.get("/client.js")
+    def client_bundle():
+        return FileResponse(assets / "client.js", media_type="text/javascript")
+
+    @app.get("/leaflet.css")
+    def map_style():
+        return FileResponse(assets / "leaflet.css", media_type="text/css")
+
+    @app.get("/images/{name}")
+    def map_asset(name: str):
+        if name not in ("marker-icon.png", "marker-icon-2x.png", "marker-shadow.png", "layers.png", "layers-2x.png"):
+            raise HTTPException(404)
+        return FileResponse(assets / "images" / name)
 
     return app
