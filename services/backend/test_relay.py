@@ -311,6 +311,26 @@ class RelayTests(unittest.TestCase):
         self.assertEqual(call.kwargs['headers']['authorization'],'Bearer synthetic-oauth-token')
         with Session(self.app.state.engine) as db:self.assertEqual(db.query(PushDelivery).count(),0)
 
+    def test_state_pagination_is_bounded_and_complete(self):
+        a=self.bootstrap()
+        for number in range(10):self.publish(a,kind='place',data={'name':f'Synthetic {number}'})
+        first=self.call(a,'GET','/api/state').json()
+        self.assertEqual(len(first['records']),8)
+        second=self.call(a,'GET',f"/api/state?cursor={first['next_cursor']}").json()
+        self.assertEqual(len(second['records']),2)
+        self.assertEqual(len({r['envelope']['body']['id'] for r in first['records']+second['records']}),10)
+        self.assertIsNone(second['next_cursor'])
+        self.assertEqual(self.call(a,'GET','/api/state?limit=9').status_code,422)
+        self.assertEqual(self.call(a,'GET','/api/records?limit=51').status_code,422)
+
+    def test_signed_metadata_requires_exact_domain_and_integer_types(self):
+        a=self.bootstrap();r=self.record(a)
+        r['body']['domain']='family-stalkerXrecordYv1'
+        r['signature']=B64(a['signing'].sign(canonical(r['body'])).signature)
+        self.assertEqual(self.call(a,'POST','/api/records',r).status_code,422)
+        r=self.record(a);r['body']['sequence']=True
+        self.assertEqual(self.call(a,'POST','/api/records',r).status_code,422)
+
     def test_version_one_upgrade_preserves_accounts_and_requires_matching_key(self):
         with Session(self.app.state.engine) as db:db.get(Settings,1).version=1;db.commit()
         self.app.state.initialize()

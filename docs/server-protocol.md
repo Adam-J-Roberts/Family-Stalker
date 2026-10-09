@@ -80,6 +80,8 @@ Default history retention is 14 days, configurable downward to 1–14 days. Loca
 
 Current places/profiles persist until changed/deleted. Old replaced ciphertext is deleted. Signing/device/roster metadata remain to validate retained records and prevent replay. Security activity is retained for 14 days. Expired sessions are cleaned. Separate Docker/PostgreSQL backups, replicas, browser memory and previously downloaded recipient copies have separate retention; deleting database rows does not securely erase disk blocks or PostgreSQL WAL. Operators must configure and test backup expiry.
 
+State responses are paginated at a maximum of eight records, history at fifty, and the container limits request concurrency to sixteen to bound response memory. Native clients must follow the returned cursors; the browser does so automatically.
+
 Default ciphertext quota is 512 MiB (`STALKER_STORAGE_QUOTA_MIB`); it is a payload quota, not total PostgreSQL disk usage. Limits: 32 approved devices, 8 non-revoked devices per account, 64 pending/approved devices total, 64 current place/profile entities, 120 history updates per device/minute, 1 MiB HTTP upload, sealed payload at most 2 KiB for location/event/place and 16 KiB for profile per recipient. These bound response/memory/storage use; they are prototype household limits.
 
 A member can delete their own stored GPS/event history. This preserves saved places/profiles and other members' history. Clients must clear unsent queues when deleting history or pausing sharing. Account/device revocation cannot retract previously downloaded data. The server still sees accounts, device identities, routing, sizes and timestamps. No coordinates/place names are written to application access logs; access logging is disabled.
@@ -94,8 +96,8 @@ A member can delete their own stored GPS/event history. This preserves saved pla
 | `POST /api/devices/register` | Verified account, registration signature; returns one-time device credential. |
 | `GET /api/device`, `GET /api/roster?after=N` | Device bearer token; pending devices can inspect public pairing state. Roster chain pages hold at most 100 revisions. |
 | `POST /api/roster` | Device bearer token plus trusted signature/local genesis token. |
-| `POST /api/records`, `GET /api/state` | Approved device bearer token; upload or current recipient-authorized ciphertext. |
-| `GET /api/records?kind=location&limit=100&cursor=...` | Approved device; paged history. Event history uses `kind=event`. Compound cursor handles equal capture timestamps. |
+| `POST /api/records`, `GET /api/state?cursor=...` | Approved device bearer token; upload or current recipient-authorized ciphertext. |
+| `GET /api/records?kind=location&limit=50&cursor=...` | Approved device; paged history. Event history uses `kind=event`. Compound cursor handles equal capture timestamps. |
 | `GET /api/records/{id}` | Approved recipient device; missing/expired/not-addressed records return 404. |
 | `DELETE /api/records/mine` | Approved device; delete its account's location/event history. |
 | `PUT /api/sharing` | Approved device; `{enabled:false}` pauses publication and hides that device's latest location. |

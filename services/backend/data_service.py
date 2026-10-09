@@ -8,7 +8,8 @@ import secrets
 import time
 
 from fastapi import Depends, HTTPException, Request
-from pydantic import Field
+from pydantic import Field, ConfigDict
+from typing import Literal
 from nacl.exceptions import BadSignatureError
 from nacl.signing import VerifyKey
 from sqlalchemy import BigInteger, Boolean, Float, Integer, String, Text, UniqueConstraint, ForeignKey, Index, func, select, and_, or_
@@ -136,7 +137,11 @@ class AuditEntry(Base):
     created: Mapped[float] = mapped_column(Float, index=True)
 
 
-class RegisterInput(Input):
+class CryptoInput(Input):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+
+class RegisterInput(CryptoInput):
     id: str = Field(pattern="^[a-f0-9]{32}$")
     name: str = Field(min_length=1, max_length=64)
     signing_key: str = Field(max_length=44)
@@ -144,15 +149,15 @@ class RegisterInput(Input):
     signature: str = Field(max_length=88)
 
 
-class Identity(Input):
+class Identity(CryptoInput):
     id: str = Field(pattern="^[a-f0-9]{32}$")
     account_id: str = Field(pattern="^[a-f0-9]{32}$")
     signing_key: str = Field(max_length=44)
     box_key: str = Field(max_length=44)
 
 
-class RosterBody(Input):
-    domain: str = Field(pattern="^family-stalker.roster.v1$")
+class RosterBody(CryptoInput):
+    domain: Literal["family-stalker.roster.v1"]
     household: str = Field(pattern="^[a-f0-9]{32}$")
     revision: int = Field(ge=1, le=2147483647)
     previous: str = Field(pattern="^([a-f0-9]{64})?$")
@@ -172,8 +177,8 @@ class Recipient(Input):
     box: str = Field(min_length=64, max_length=100000)
 
 
-class RecordBody(Input):
-    domain: str = Field(pattern="^family-stalker.record.v1$")
+class RecordBody(CryptoInput):
+    domain: Literal["family-stalker.record.v1"]
     household: str = Field(pattern="^[a-f0-9]{32}$")
     revision: int = Field(ge=1)
     id: str = Field(pattern="^[a-f0-9]{32}$")
@@ -462,9 +467,9 @@ def install(app, engine, directory, cipher, database, current, admin, rate, noti
         return {"id": record.id, "duplicate": False}
 
     @app.get("/api/records")
-    def history(kind: str = "location", cursor: str | None = None, limit: int = 100, device=Depends(approved), db: Session = Depends(database)):
-        if kind not in ("location", "event") or not 1 <= limit <= 200:
-            raise HTTPException(422, "Use a history kind and limit 1–200")
+    def history(kind: str = "location", cursor: str | None = None, limit: int = 50, device=Depends(approved), db: Session = Depends(database)):
+        if kind not in ("location", "event") or not 1 <= limit <= 50:
+            raise HTTPException(422, "Use a history kind and limit 1–50")
         query = visible_query(db).join(RecordRecipient, RecordRecipient.record_id == EncryptedRecord.id).where(RecordRecipient.device_id == device.id, EncryptedRecord.kind == kind)
         if cursor is not None:
             import re
@@ -485,15 +490,20 @@ def install(app, engine, directory, cipher, database, current, admin, rate, noti
         return serialize(record)
 
     @app.get("/api/state")
-    def latest(device=Depends(approved), db: Session = Depends(database)):
-        rows = list(db.scalars(visible_query(db).join(LatestState, LatestState.record_id == EncryptedRecord.id).join(RecordRecipient, RecordRecipient.record_id == EncryptedRecord.id).where(RecordRecipient.device_id == device.id)))
-        chosen = []
-        for record in rows:
-            source = db.get(ClientDevice, record.device_id)
-            if record.kind == "location" and (not source or source.status != "approved" or not source.sharing):
-                continue
-            chosen.append(record)
-        return {"revision": db.get(ServiceState, 1).revision, "records": [serialize(r) for r in chosen]}
+    def latest(cursor: str | None = None, limit: int = 8, device=Depends(approved), db: Session = Depends(database)):
+        if not 1 <= limit <= 8:
+            raise HTTPException(422, "Use a state page size 1–8")
+        query = visible_query(db).join(LatestState, LatestState.record_id == EncryptedRecord.id).join(RecordRecipient, RecordRecipient.record_id == EncryptedRecord.id).join(ClientDevice, ClientDevice.id == EncryptedRecord.device_id).where(RecordRecipient.device_id == device.id, or_(EncryptedRecord.kind != "location", and_(ClientDevice.status == "approved", ClientDevice.sharing.is_(True))))
+        if cursor:
+            import re
+            if not re.fullmatch(r"(location|place|profile):[a-f0-9]{32}", cursor):
+                raise HTTPException(422, "Invalid state cursor")
+            kind, entity = cursor.split(":")
+            query = query.where(or_(EncryptedRecord.kind > kind, and_(EncryptedRecord.kind == kind, EncryptedRecord.entity_id > entity)))
+        rows = list(db.scalars(query.order_by(EncryptedRecord.kind, EncryptedRecord.entity_id).limit(limit + 1)))
+        has_more = len(rows) > limit
+        rows = rows[:limit]
+        return {"revision": db.get(ServiceState, 1).revision, "records": [serialize(r) for r in rows], "next_cursor": f"{rows[-1].kind}:{rows[-1].entity_id}" if has_more else None}
 
     @app.delete("/api/records/mine")
     def erase_own_history(device=Depends(approved), db: Session = Depends(database)):
