@@ -90,7 +90,7 @@ const assert = require('node:assert/strict');
     const context2=await browser.newContext({viewport:{width:390,height:844}}),second=await context2.newPage();
     second.on('pageerror',error=>errors.push(error.message));
     const external=[];
-    for(const p of [page,second])p.on('request',request=>{if(!request.url().startsWith(origin))external.push(request.url());});
+    for(const p of [page,second])p.on('request',request=>{if(/^https?:/.test(request.url())&&!request.url().startsWith(origin))external.push(request.url());});
     await second.goto(origin);
     await second.locator('#login [name=email]').fill('owner@example.invalid');
     await second.locator('#login [name=password]').fill('synthetic long test password');
@@ -115,16 +115,30 @@ const assert = require('node:assert/strict');
     await page.getByText('Encrypted location published.',{exact:true}).waitFor();
     await page.getByRole('button',{name:'Share saved places with newly approved devices',exact:true}).click();
     await page.getByText('Places encrypted for the current membership.',{exact:true}).waitFor();
+    const png=await page.evaluate(()=>{const c=document.createElement('canvas');c.width=c.height=2;c.getContext('2d').fillRect(0,0,2,2);return c.toDataURL('image/png').split(',')[1];});
+    await page.getByLabel('Display name',{exact:true}).fill('Synthetic Private Owner');
+    await page.getByLabel('Map photo (optional)',{exact:true}).setInputFiles({name:'synthetic-photo.png',mimeType:'image/png',buffer:Buffer.from(png,'base64')});
+    await page.getByRole('button',{name:'Save encrypted profile',exact:true}).click();
+    await page.getByText('Encrypted profile saved.',{exact:true}).waitFor();
+    // More than one state page: exercise the browser cursor, not just the API.
+    for(let number=0;number<9;number++){
+      await page.getByLabel('Place name',{exact:true}).fill(`Synthetic Additional Place ${number}`);
+      await page.getByRole('button',{name:'Save encrypted place',exact:true}).click();
+      await page.getByText('Encrypted place saved.',{exact:true}).waitFor();
+    }
     await second.getByRole('button',{name:'Refresh updates',exact:true}).click();
     await second.locator('#location-list').getByText(/12.3456789/).waitFor();
     await second.locator('#place-list').getByText('Synthetic Private Home · 100 m',{exact:true}).waitFor();
+    assert.equal(await second.locator('#place-list .member').count(),10,'All paginated places displayed');
+    assert.equal(await second.locator('.map-person img').count(),1,'Encrypted photo displayed on recipient marker');
+    await second.locator('#location-list').getByText(/Synthetic Private Owner/).waitFor();
     assert.ok(await second.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Phone map layout fits');
-    await page.getByRole('button',{name:'Test arrival',exact:true}).click();
+    await page.locator('#place-list .member').filter({hasText:'Synthetic Private Home'}).getByRole('button',{name:'Test arrival',exact:true}).click();
     await page.getByText('Encrypted test event published.',{exact:true}).waitFor();
     await second.getByRole('button',{name:'Load household events',exact:true}).click();
     await second.locator('#history-list').getByText(/Synthetic Private Home/).waitFor();
     assert.ok(recordRequests.length>=5);
-    for(const raw of recordRequests){assert.ok(!raw.includes('12.3456789'));assert.ok(!raw.includes('Synthetic Private Home'));const value=JSON.parse(raw);assert.equal(value.body.domain,'family-stalker.record.v1');assert.ok(value.signature);}
+    for(const raw of recordRequests){assert.ok(!raw.includes('12.3456789'));assert.ok(!raw.includes('Synthetic Private Home'));assert.ok(!raw.includes('Synthetic Private Owner'));const value=JSON.parse(raw);assert.equal(value.body.domain,'family-stalker.record.v1');assert.ok(value.signature);}
     const savedVault=await second.evaluate(()=>Object.values(localStorage).find(value=>value.includes('"version":1')));
     assert.ok(savedVault&&!savedVault.includes('signing_secret')&&!savedVault.includes('credential'));
     assert.deepEqual(external,[],'No map-provider requests before consent');

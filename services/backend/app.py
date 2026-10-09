@@ -536,7 +536,7 @@ def create_app(database_url=None, data_dir=None, public_url=None, allow_http=Non
             raise HTTPException(404, "Account not found")
         if account.role == "admin":
             raise HTTPException(409, "Owner revocation is not supported")
-        revoke_account_data(db, account_id)
+        revoke_account_data(db, account_id, auth[0].id)
         account.status = "revoked"
         db.query(LoginSession).filter_by(account_id=account_id).delete()
         db.query(Challenge).filter_by(account_id=account_id).delete()

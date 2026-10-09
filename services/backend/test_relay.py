@@ -14,7 +14,7 @@ from cryptography.hazmat.primitives.asymmetric import ec, rsa
 from fastapi.testclient import TestClient
 import test_setup
 from app import Account, HASHER, LoginSession, Settings, create_app, digest
-from data_service import ClientDevice, EncryptedRecord, LatestState, PushDelivery, PushSubscription, RosterRevision, ServiceState, canonical
+from data_service import AuditEntry, ClientDevice, EncryptedRecord, LatestState, PushDelivery, PushSubscription, RosterRevision, ServiceState, canonical
 
 B64=lambda x:base64.b64encode(bytes(x)).decode()
 
@@ -280,6 +280,10 @@ class RelayTests(unittest.TestCase):
         a=self.bootstrap();member,client=self.member();b=self.register(client,member)
         self.call(a,'POST','/api/roster',self.roster(a,[a,b]));self.publish(a)
         self.assertEqual(self.client.post(f'/api/accounts/{member}/revoke',json={}).status_code,200)
+        with Session(self.app.state.engine) as db:
+            entry=db.scalar(select(AuditEntry).where(AuditEntry.action=='account.revoked'))
+            self.assertEqual(entry.actor_id,self.owner_id)
+            self.assertEqual(entry.target_id,member)
         self.assertEqual(self.call(b,'GET','/api/state').status_code,401)
         self.assertEqual(self.call(a,'POST','/api/records',self.record(a,recipients=[a,b])).status_code,409)
         self.assertEqual(self.call(a,'POST','/api/roster',self.roster(a,[a])).status_code,200)
@@ -330,6 +334,14 @@ class RelayTests(unittest.TestCase):
         self.assertEqual(self.call(a,'POST','/api/records',r).status_code,422)
         r=self.record(a);r['body']['sequence']=True
         self.assertEqual(self.call(a,'POST','/api/records',r).status_code,422)
+
+    def test_low_order_encryption_key_cannot_enter_the_roster(self):
+        signing=SigningKey.generate();ident=secrets.token_hex(16)
+        value=dict(id=ident,account_id=self.owner_id,signing_key=B64(signing.verify_key),box_key=B64(bytes(32)))
+        registration=dict(domain='family-stalker.device.v1',household=self.household,**value)
+        result=self.client.post('/api/devices/register',json=dict(id=ident,name='Invalid encryption identity',signing_key=value['signing_key'],box_key=value['box_key'],signature=B64(signing.sign(canonical(registration)).signature)))
+        self.assertEqual(result.status_code,422)
+        with Session(self.app.state.engine) as db:self.assertIsNone(db.get(ClientDevice,ident))
 
     def test_version_one_upgrade_preserves_accounts_and_requires_matching_key(self):
         with Session(self.app.state.engine) as db:db.get(Settings,1).version=1;db.commit()

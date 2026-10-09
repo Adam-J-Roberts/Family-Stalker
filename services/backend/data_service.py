@@ -10,7 +10,8 @@ import time
 from fastapi import Depends, HTTPException, Request
 from pydantic import Field, ConfigDict
 from typing import Literal
-from nacl.exceptions import BadSignatureError
+from nacl.exceptions import BadSignatureError, CryptoError
+from nacl.bindings import crypto_scalarmult
 from nacl.signing import VerifyKey
 from sqlalchemy import BigInteger, Boolean, Float, Integer, String, Text, UniqueConstraint, ForeignKey, Index, func, select, and_, or_
 from sqlalchemy.orm import Mapped, Session, mapped_column
@@ -245,13 +246,13 @@ def prune(db):
     db.commit()
 
 
-def revoke_account_data(db, account_id):
+def revoke_account_data(db, account_id, actor_id):
     ids = list(db.scalars(select(ClientDevice.id).where(ClientDevice.account_id == account_id)))
     db.query(ClientDevice).filter_by(account_id=account_id).update({ClientDevice.status: "revoked"})
     if ids:
         db.query(PushSubscription).filter(PushSubscription.device_id.in_(ids)).delete(synchronize_session=False)
         db.query(PushDelivery).filter(PushDelivery.device_id.in_(ids)).delete(synchronize_session=False)
-    audit(db, "account.revoked", account_id, account_id)
+    audit(db, "account.revoked", actor_id, account_id)
 
 
 def install(app, engine, directory, cipher, database, current, admin, rate, notifier=None):
@@ -306,7 +307,10 @@ def install(app, engine, directory, cipher, database, current, admin, rate, noti
             raise HTTPException(409, "Device limit reached; remove an unused device")
         if db.get(ClientDevice, body.id) or db.scalar(select(ClientDevice).where((ClientDevice.signing_key == body.signing_key) | (ClientDevice.box_key == body.box_key))):
             raise HTTPException(409, "Device identity already registered")
-        decode(body.box_key, 32)
+        try:
+            crypto_scalarmult(secrets.token_bytes(32), decode(body.box_key, 32))
+        except CryptoError:
+            raise HTTPException(422, "Invalid X25519 public key")
         registration = {"domain": "family-stalker.device.v1", "household": state.household_id, "id": body.id, "account_id": auth[0].id, "signing_key": body.signing_key, "box_key": body.box_key}
         verify_signature(body.signing_key, registration, body.signature)
         token = secrets.token_urlsafe(32)
