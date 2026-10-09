@@ -8,6 +8,6 @@ For security-sensitive changes, include negative tests: wrong user/device, pendi
 
 Document native iOS tests separately from server checks. A successful server test or simulator build does not establish locked-phone reliability or battery performance.
 
-The current foundation has no runnable application or CI. Add meaningful checks alongside the implementation rather than publishing a green check that only verifies placeholders.
+The Container workflow runs the health scaffold tests, Compose validation, and a hardened container smoke test. This proves packaging behavior only. Add meaningful checks alongside new implementation; a green container check does not validate location sharing or encryption.
 
 Select a license before accepting third-party contributions. Until then, public source availability does not establish an open-source permission grant.

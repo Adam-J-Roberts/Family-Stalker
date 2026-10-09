@@ -1,0 +1,5 @@
+# Allow only the runtime source into the build context.
+**
+!services/
+!services/backend/
+!services/backend/server.py

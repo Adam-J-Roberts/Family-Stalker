@@ -1,0 +1,74 @@
+name: Container
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: container-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Backend tests
+        run: python3 -m unittest discover -s services/backend -v
+      - name: Validate Compose
+        run: docker compose -f deploy/compose.yaml config --quiet
+      - name: Build image
+        run: docker build --pull -t family-stalker:test .
+      - name: Smoke test hardened container
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run -d --name stalker-smoke --read-only --cap-drop ALL \
+            --security-opt no-new-privileges:true --pids-limit 64 --memory 128m \
+            family-stalker:test
+          trap 'docker rm -f stalker-smoke >/dev/null' EXIT
+          ready=false
+          for attempt in {1..30}; do
+            if docker exec stalker-smoke python -c "import json,urllib.request; r=json.load(urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=3)); assert r == {'status':'ok','stage':'scaffold'}"; then
+              ready=true
+              break
+            fi
+            sleep 1
+          done
+          test "$ready" = true
+          test "$(docker inspect --format '{{.Config.User}}' stalker-smoke)" = '10001:10001'
+
+  publish:
+    needs: validate
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Build and publish
+        shell: bash
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          image="ghcr.io/${GITHUB_REPOSITORY,,}"
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          trap 'docker logout ghcr.io >/dev/null' EXIT
+          docker build --pull \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            -t "$image:sha-$GITHUB_SHA" -t "$image:latest" .
+          docker push "$image:sha-$GITHUB_SHA"
+          docker push "$image:latest"
