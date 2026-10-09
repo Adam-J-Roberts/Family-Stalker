@@ -4,6 +4,10 @@
 
 Requirements, component boundaries, security draft, folder ownership, and collaboration instructions. No runnable software is claimed.
 
+## Server setup — prerequisite milestone
+
+Persistent Docker/PostgreSQL, first-run website, owner login, SMTP, pending invitations, verification and member revocation. See [scope and acceptance](server-setup.md). This work comes before the encryption spike; it does not enable location or pairing.
+
 ## 1 — Encryption and two-device pairing spike
 
 - Select the backend stack and maintained cross-platform cryptographic implementation.

@@ -42,7 +42,7 @@ Actual wire fields, signatures, replay protections, key epochs, and membership t
 
 ## Deployment
 
-Target one API/worker application image plus PostgreSQL and durable volumes, behind HTTPS. Prefer compatibility with an existing reverse proxy while documenting a simple standalone option. The database must not be exposed publicly.
+The setup milestone implements one FastAPI/Uvicorn API with a background email worker, PostgreSQL and separate database/server-secret volumes, behind HTTPS. Only one application replica/worker is supported. Location routing remains gated. Prefer compatibility with an existing reverse proxy while documenting a simple standalone option. The database must not be exposed publicly.
 
 Email and push configuration need guided setup and diagnostics. Docker packaging alone does not eliminate those external setup requirements. TLS, backups, schema migrations, health checks, and upgrades are deliverables, not assumed behavior.
 
