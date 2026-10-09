@@ -7,7 +7,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 WORKDIR /app
 COPY services/backend/requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt \
-    && mkdir /data && chown 10001:10001 /data
+    && mkdir /data && chown 10001:10001 /data && chmod 0700 /data
 COPY services/backend/app.py services/backend/manage.py /app/
 COPY services/backend/static /app/static
 USER 10001:10001
