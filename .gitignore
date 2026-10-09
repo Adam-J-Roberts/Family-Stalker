@@ -1,0 +1,36 @@
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.p8
+*.mobileprovision
+
+# Native/local build output
+.DS_Store
+DerivedData/
+build/
+.build/
+xcuserdata/
+*.xcuserstate
+.gradle/
+local.properties
+.idea/
+
+# Future server/web dependencies
+node_modules/
+dist/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Runtime/private state
+data/
+backups/
+*.sqlite
+*.sqlite3
+*.db
+*.log
