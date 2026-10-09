@@ -1,0 +1,16 @@
+name: family-stalker
+
+services:
+  stalker:
+    image: ghcr.io/adam-j-roberts/family-stalker:${STALKER_TAG:-latest}
+    restart: unless-stopped
+    init: true
+    ports:
+      - "${STALKER_BIND_ADDRESS:-127.0.0.1}:${STALKER_PORT:-8186}:8080"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 64
+    mem_limit: 128m

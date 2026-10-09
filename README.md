@@ -4,7 +4,7 @@ An iOS-first, self-hosted household location-sharing project, with Android plann
 
 ## Status
 
-Design and repository foundation only. There is no runnable app or deployable server yet. Encryption is a requirement, not an implemented or audited claim. Do not use this project for real location data until the encrypted prototype has been validated.
+Design and container packaging scaffold. There is no mobile app or location service yet. A health-only Docker image can be built and published using the Container workflow; see [deployment instructions](deploy/README.md). Encryption is a requirement, not an implemented or audited claim. Do not use this project for real location data until the encrypted prototype has been validated.
 
 ## Intended experience
 
@@ -24,7 +24,7 @@ The server stores encrypted location payloads. Approved devices decrypt them. Op
 | `apps/android/` | Future Kotlin/Compose client |
 | `services/backend/` | Accounts, device registration, encrypted data routing, email and push |
 | `web/setup/` | First-run administration website |
-| `deploy/` | Future Docker Compose deployment |
+| `deploy/` | Docker Compose and publishing/deployment instructions |
 | `docs/` | Requirements, architecture, security model, milestones |
 
 Start with [requirements](docs/requirements.md), [architecture](docs/architecture.md), [security](docs/security-model.md), and [milestones](docs/milestones.md).
