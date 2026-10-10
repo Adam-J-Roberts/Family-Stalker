@@ -350,6 +350,36 @@ class SetupTests(unittest.TestCase):
             self.assertIn("frame-ancestors 'none'", response.headers["content-security-policy"])
         self.assertNotIn(self.token, self.client.get("/").text)
 
+    def test_default_map_configuration_requires_login(self):
+        self.assertEqual(self.client.get("/api/maps").status_code, 401)
+        self.configure()
+        self.assertEqual(self.client.get("/api/maps").json(), {"provider": "openstreetmap", "api_key": ""})
+        self.assertNotIn("googleapis.com", self.client.get("/").headers["content-security-policy"])
+
+    def test_configured_google_maps_key_and_nonce(self):
+        self.configure()
+        with patch.dict(os.environ, {"STALKER_GOOGLE_MAPS_API_KEY": " synthetic-maps-key "}):
+            application = create_app(self.db_url, self.path, PUBLIC, mail_worker=False)
+        with TestClient(application, base_url=PUBLIC) as client:
+            self.assertEqual(client.get("/api/maps").status_code, 401)
+            client.cookies.update(self.client.cookies)
+            result = client.get("/api/maps")
+            self.assertEqual(result.json(), {"provider": "google", "api_key": "synthetic-maps-key"})
+            self.assertEqual(result.headers["cache-control"], "no-store")
+            page = client.get("/")
+            nonce = re.search(r'<script nonce="([^"]+)"', page.text).group(1)
+            self.assertIn(f"'nonce-{nonce}'", page.headers["content-security-policy"])
+            self.assertIn("'strict-dynamic'", page.headers["content-security-policy"])
+            self.assertNotIn("synthetic-maps-key", page.text)
+            self.assertEqual(page.headers["referrer-policy"], "strict-origin-when-cross-origin")
+            self.assertNotIn(f'nonce="{nonce}"', client.get("/").text)
+
+    def test_whitespace_google_key_keeps_default_policy(self):
+        with patch.dict(os.environ, {"STALKER_GOOGLE_MAPS_API_KEY": "   "}):
+            application = create_app(self.db_url, self.path, PUBLIC, mail_worker=False)
+        with TestClient(application, base_url=PUBLIC) as client:
+            self.assertEqual(client.get("/").headers["referrer-policy"], "no-referrer")
+
 
 if __name__ == "__main__":
     unittest.main()

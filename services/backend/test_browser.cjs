@@ -16,7 +16,7 @@ const assert = require('node:assert/strict');
   const origin = `http://127.0.0.1:${port}`;
   const server = spawn(process.env.STALKER_TEST_PYTHON || 'python3', ['-m','uvicorn','app:create_app','--factory','--host','127.0.0.1','--port',String(port),'--no-access-log','--no-proxy-headers'], {
     cwd: __dirname,
-    env: {...process.env, DATABASE_URL:`sqlite:///${directory}/test.db`, STALKER_DATA_DIR:directory, STALKER_PUBLIC_URL:origin, STALKER_ALLOW_HTTP:'1'},
+    env: {...process.env, DATABASE_URL:`sqlite:///${directory}/test.db`, STALKER_DATA_DIR:directory, STALKER_PUBLIC_URL:origin, STALKER_ALLOW_HTTP:'1', STALKER_GOOGLE_MAPS_API_KEY:process.env.STALKER_TEST_MAP_PROVIDER==='google'?'synthetic-browser-key':''},
     stdio: ['ignore','ignore','ignore']
   });
   let browser;
@@ -29,7 +29,7 @@ const assert = require('node:assert/strict');
       await new Promise(resolve => setTimeout(resolve, 100));
     }
     assert.ok(ready, 'Synthetic web server ready');
-    browser = await chromium.launch();
+    browser = await chromium.launch(process.env.STALKER_TEST_BROWSER_EXECUTABLE ? {executablePath:process.env.STALKER_TEST_BROWSER_EXECUTABLE,args:['--no-sandbox']} : {});
     const page = await browser.newPage({viewport:{width:1100,height:950}});
     const errors=[];
     page.on('pageerror', error => errors.push(error.message));
@@ -154,8 +154,42 @@ const assert = require('node:assert/strict');
     const savedVault=await second.evaluate(()=>Object.values(localStorage).find(value=>value.includes('"version":1')));
     assert.ok(savedVault&&!savedVault.includes('signing_secret')&&!savedVault.includes('credential'));
     assert.deepEqual(external,[],'No map-provider requests before consent');
+    const googleMode=process.env.STALKER_TEST_MAP_PROVIDER==='google';
+    // Intercept provider traffic: these checks never spend map quota or send coordinates externally.
+    const tile=Buffer.from(png,'base64');
+    for(const p of [page,second])await p.route('https://tile.openstreetmap.org/**',route=>route.fulfill({contentType:'image/png',body:tile}));
+    if(googleMode){
+      await second.route('https://maps.googleapis.com/maps/api/js?**',async route=>{
+        assert.equal(new URL(route.request().url()).searchParams.get('key'),'synthetic-browser-key');
+        assert.equal(route.request().headers().referer,`${origin}/`,'Restricted key receives origin referrer');
+        await route.fulfill({contentType:'text/javascript',body:await fs.readFile(path.join(__dirname,'../../web/client/test_google_stub.js'),'utf8')});
+      });
+      await second.getByRole('button',{name:'Load Google Maps',exact:true}).click();
+      await second.getByText('Map loaded.',{exact:true}).waitFor();
+      assert.equal(await second.locator('.map-person img').count(),1,'Google preserves encrypted photo');
+      assert.equal(await second.evaluate(()=>testGoogleMaps.circles.filter(c=>c.map&&c.radius===100).length),10,'Google preserves place radii');
+      assert.equal(await second.evaluate(()=>testGoogleMaps.maps[0].getZoom()),15,'Google limits initial zoom');
+      await second.locator('.map-person').click();
+      await second.locator('.test-google-popup').getByText('Synthetic Private Owner',{exact:true}).waitFor();
+      await second.getByRole('button',{name:'Refresh updates',exact:true}).click();
+      await second.getByRole('button',{name:'Refresh updates',exact:true}).waitFor();
+      await second.waitForFunction(()=>testGoogleMaps.circles.filter(c=>c.map).length===10);
+      // Authorization errors must be visible and offer an explicit free-provider fallback.
+      await page.route('https://maps.googleapis.com/maps/api/js?**',route=>route.fulfill({contentType:'text/javascript',body:'window.gm_authFailure();'}));
+      await page.getByRole('button',{name:'Load Google Maps',exact:true}).click();
+      await page.getByText(/Google Maps authorization failed/).waitFor();
+      await page.getByRole('button',{name:'Use OpenStreetMap instead',exact:true}).click();
+      await page.getByText('OpenStreetMap loaded.',{exact:true}).waitFor();
+      assert.equal(await page.locator('.map-person img').count(),1,'Fallback keeps marker photo');
+    }else{
+      await second.getByRole('button',{name:'Load OpenStreetMap tiles',exact:true}).click();
+      await second.getByText('Map loaded.',{exact:true}).waitFor();
+      assert.ok(external.some(url=>url.startsWith('https://tile.openstreetmap.org/')),'Default provider loads tiles after consent');
+      assert.ok(!external.some(url=>url.includes('googleapis.com')),'No Google request without a key');
+    }
     await second.getByRole('button',{name:'Lock map',exact:true}).click();
     await second.getByRole('heading',{name:'Unlock this browser.',exact:true}).waitFor();
+    if(googleMode)assert.equal(await second.evaluate(()=>testGoogleMaps.overlays.filter(m=>m.map).length),0,'Lock removes Google locations');
     await second.getByLabel('Browser-vault passphrase',{exact:true}).fill('incorrect passphrase');
     await second.getByRole('button',{name:'Unlock map',exact:true}).click();
     await second.getByText('Could not unlock: check your browser-vault passphrase.',{exact:true}).waitFor();
