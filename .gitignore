@@ -16,6 +16,7 @@ build/
 xcuserdata/
 *.xcuserstate
 .gradle/
+.kotlin/
 local.properties
 .idea/
 

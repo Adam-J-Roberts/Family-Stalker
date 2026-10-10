@@ -1,12 +1,12 @@
 # Family-Stalker
 
-An iOS-first, self-hosted household location-sharing project, with Android planned. One Docker deployment represents one household. Approved members see each other's shared locations and household places.
+A self-hosted household location-sharing project, with native Android development underway and iOS planned. One Docker deployment represents one household. Approved members see each other's shared locations and household places.
 
 ## Status
 
 The server provides setup/admin and household-map web UIs, invitations, trusted-device enrollment, encrypted data receiving/storage, history, saved places/profiles, and generic APNs/FCM push routing. GPS and event history default to **14 days**; current saved places/profiles persist until changed or deleted.
 
-See [deployment](deploy/README.md) and the [server/client protocol and security limits](docs/server-protocol.md). The reference browser generates and stores its own encrypted device keys; Docker cannot collect GPS itself. **Native iOS/Android background-tracking clients are not implemented yet.** This is a runnable prototype, with synthetic tests, not an independently audited production security claim.
+The [Android starter](apps/android/README.md) provides native sign-in and a local map preview; encrypted native enrollment/sharing remains next work. See [deployment](deploy/README.md) and the [server/client protocol and security limits](docs/server-protocol.md). The reference browser generates and stores its own encrypted device keys; Docker cannot collect GPS itself. **Native iOS/Android background-tracking clients are not implemented yet.** This is a runnable prototype, with synthetic tests, not an independently audited production security claim.
 
 ## Intended experience
 
@@ -23,7 +23,7 @@ The server stores encrypted location payloads. Approved devices decrypt them. Op
 | Path | Responsibility |
 | --- | --- |
 | `apps/ios/` | Swift/SwiftUI client and native background location |
-| `apps/android/` | Future Kotlin/Compose client |
+| `apps/android/` | Kotlin/Compose MVVM starter: native sign-in and local map preview |
 | `services/backend/` | Accounts, device registration, encrypted data routing, email and push |
 | `services/backend/static/` | Served first-run administration website |
 | `deploy/` | Docker Compose and publishing/deployment instructions |
