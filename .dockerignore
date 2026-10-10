@@ -2,4 +2,16 @@
 **
 !services/
 !services/backend/
-!services/backend/server.py
+!services/backend/requirements.txt
+!services/backend/app.py
+!services/backend/manage.py
+!services/backend/static/
+!services/backend/static/**
+
+!services/backend/data_service.py
+!services/backend/push_service.py
+!web/
+!web/client/
+!web/client/package.json
+!web/client/package-lock.json
+!web/client/*.mjs

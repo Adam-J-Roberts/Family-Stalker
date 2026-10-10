@@ -4,7 +4,9 @@ An iOS-first, self-hosted household location-sharing project, with Android plann
 
 ## Status
 
-Design and container packaging scaffold. There is no mobile app or location service yet. A health-only Docker image can be built and published using the Container workflow; see [deployment instructions](deploy/README.md). Encryption is a requirement, not an implemented or audited claim. Do not use this project for real location data until the encrypted prototype has been validated.
+The server provides setup/admin and household-map web UIs, invitations, trusted-device enrollment, encrypted data receiving/storage, history, saved places/profiles, and generic APNs/FCM push routing. GPS and event history default to **14 days**; current saved places/profiles persist until changed or deleted.
+
+See [deployment](deploy/README.md) and the [server/client protocol and security limits](docs/server-protocol.md). The reference browser generates and stores its own encrypted device keys; Docker cannot collect GPS itself. **Native iOS/Android background-tracking clients are not implemented yet.** This is a runnable prototype, with synthetic tests, not an independently audited production security claim.
 
 ## Intended experience
 
@@ -23,7 +25,7 @@ The server stores encrypted location payloads. Approved devices decrypt them. Op
 | `apps/ios/` | Swift/SwiftUI client and native background location |
 | `apps/android/` | Future Kotlin/Compose client |
 | `services/backend/` | Accounts, device registration, encrypted data routing, email and push |
-| `web/setup/` | First-run administration website |
+| `services/backend/static/` | Served first-run administration website |
 | `deploy/` | Docker Compose and publishing/deployment instructions |
 | `docs/` | Requirements, architecture, security model, milestones |
 

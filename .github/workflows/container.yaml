@@ -17,13 +17,42 @@ jobs:
   validate:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17-bookworm
+        env:
+          POSTGRES_USER: stalker_test
+          POSTGRES_PASSWORD: synthetic-ci-password
+          POSTGRES_DB: stalker_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U stalker_test -d stalker_test"
+          --health-interval 5s --health-timeout 3s --health-retries 20
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           persist-credentials: false
-      - name: Backend tests
+      - name: Install test dependencies
+        run: python3 -m pip install -r services/backend/requirements-dev.txt
+      - name: Backend tests (SQLite)
         run: python3 -m unittest discover -s services/backend -v
+      - name: Backend tests (PostgreSQL)
+        env:
+          STALKER_TEST_DATABASE_URL: postgresql+psycopg://stalker_test:synthetic-ci-password@127.0.0.1:5432/stalker_test
+        run: python3 -m unittest discover -s services/backend -v
+      - name: Build and verify browser crypto
+        run: |
+          npm --prefix web/client ci --ignore-scripts
+          npm --prefix web/client test
+          npm --prefix web/client run build
+      - name: Browser setup and encrypted sharing checks
+        run: |
+          node web/client/node_modules/playwright/cli.js install --with-deps chromium
+          node services/backend/test_browser.cjs
       - name: Validate Compose
+        env:
+          STALKER_PUBLIC_URL: https://stalker.example.invalid
+          STALKER_DB_PASSWORD: synthetic-ci-password
         run: docker compose -f deploy/compose.yaml config --quiet
       - name: Build image
         run: docker build --pull -t family-stalker:test .
@@ -32,12 +61,15 @@ jobs:
         run: |
           set -euo pipefail
           docker run -d --name stalker-smoke --read-only --cap-drop ALL \
-            --security-opt no-new-privileges:true --pids-limit 64 --memory 128m \
+            --security-opt no-new-privileges:true --pids-limit 64 --memory 512m \
+            --tmpfs /data:rw,uid=10001,gid=10001,mode=0700 \
+            -e DATABASE_URL=sqlite:////data/smoke.db \
+            -e STALKER_PUBLIC_URL=http://localhost:8080 -e STALKER_ALLOW_HTTP=1 \
             family-stalker:test
           trap 'docker rm -f stalker-smoke >/dev/null' EXIT
           ready=false
           for attempt in {1..30}; do
-            if docker exec stalker-smoke python -c "import json,urllib.request; r=json.load(urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=3)); assert r == {'status':'ok','stage':'scaffold'}"; then
+            if docker exec stalker-smoke python -c "import json,urllib.request; r=json.load(urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=3)); assert r == {'status':'ok','stage':'setup','configured':False}"; then
               ready=true
               break
             fi
@@ -45,6 +77,32 @@ jobs:
           done
           test "$ready" = true
           test "$(docker inspect --format '{{.Config.User}}' stalker-smoke)" = '10001:10001'
+
+      - name: Compose setup and persistence
+        shell: bash
+        env:
+          STALKER_PUBLIC_URL: http://127.0.0.1:18186
+          STALKER_ALLOW_HTTP: "1"
+          STALKER_PORT: "18186"
+          STALKER_DB_PASSWORD: synthetic-compose-only-password
+          STALKER_TAG: ci-test
+        run: |
+          set -euo pipefail
+          docker tag family-stalker:test ghcr.io/adam-j-roberts/family-stalker:ci-test
+          compose=(docker compose -p stalker-ci -f deploy/compose.yaml)
+          trap '"${compose[@]}" down -v >/dev/null' EXIT
+          "${compose[@]}" up -d --wait --wait-timeout 120
+          "${compose[@]}" exec -T stalker python - <<'PYTEST'
+          import json, os, pathlib, urllib.request
+          origin = os.environ["STALKER_PUBLIC_URL"]
+          token = pathlib.Path("/data/bootstrap-token").read_text()
+          data = json.dumps(dict(token=token, household="CI Household", email="owner@example.invalid", username="owner", password="synthetic long CI password")).encode()
+          request = urllib.request.Request("http://127.0.0.1:8080/api/setup", data=data, headers={"Host":"127.0.0.1:18186", "Origin":origin, "Content-Type":"application/json"})
+          assert urllib.request.urlopen(request).status == 201
+          assert not pathlib.Path("/data/bootstrap-token").exists()
+          PYTEST
+          "${compose[@]}" up -d --no-deps --force-recreate --wait --wait-timeout 120 stalker
+          "${compose[@]}" exec -T stalker python -c "import json,urllib.request; assert json.load(urllib.request.urlopen('http://127.0.0.1:8080/healthz'))['configured'] is True"
 
   publish:
     needs: validate

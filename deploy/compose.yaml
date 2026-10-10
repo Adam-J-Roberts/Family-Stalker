@@ -5,6 +5,16 @@ services:
     image: ghcr.io/adam-j-roberts/family-stalker:${STALKER_TAG:-latest}
     restart: unless-stopped
     init: true
+    environment:
+      DATABASE_URL: postgresql+psycopg://stalker:${STALKER_DB_PASSWORD:?Run prepare.py first}@database:5432/stalker
+      STALKER_PUBLIC_URL: ${STALKER_PUBLIC_URL:?Run prepare.py first}
+      STALKER_ALLOW_HTTP: ${STALKER_ALLOW_HTTP:-0}
+      STALKER_DATA_DIR: /data
+    depends_on:
+      database:
+        condition: service_healthy
+    volumes:
+      - server-data:/data
     ports:
       - "${STALKER_BIND_ADDRESS:-127.0.0.1}:${STALKER_PORT:-8186}:8080"
     read_only: true
@@ -13,4 +23,26 @@ services:
     security_opt:
       - no-new-privileges:true
     pids_limit: 64
-    mem_limit: 128m
+    mem_limit: 512m
+
+  database:
+    image: postgres:17-bookworm
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: stalker
+      POSTGRES_DB: stalker
+      POSTGRES_PASSWORD: ${STALKER_DB_PASSWORD:?Run prepare.py first}
+    volumes:
+      - database-data:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U stalker -d stalker"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 512m
+
+volumes:
+  server-data:
+  database-data:

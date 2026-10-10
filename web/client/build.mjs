@@ -1,0 +1,10 @@
+import {build} from 'esbuild';
+import {mkdir,cp,writeFile} from 'node:fs/promises';
+const out=process.env.CLIENT_OUT || '../../services/backend/static';
+await mkdir(out,{recursive:true});
+await build({entryPoints:['client.mjs'],bundle:true,minify:true,format:'iife',platform:'browser',outfile:`${out}/client.js`,legalComments:'external',define:{'process.env.NODE_ENV':'"production"'}});
+await cp('node_modules/leaflet/dist/leaflet.css',`${out}/leaflet.css`);
+await cp('node_modules/leaflet/dist/images',`${out}/images`,{recursive:true});
+await cp('node_modules/libsodium-wrappers-sumo/LICENSE',`${out}/sodium-LICENSE`);
+await cp('node_modules/leaflet/LICENSE',`${out}/leaflet-LICENSE`);
+await writeFile(`${out}/client-versions.json`,JSON.stringify({sodium:'0.8.4',leaflet:'1.9.4'}));

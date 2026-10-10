@@ -42,10 +42,10 @@ Actual wire fields, signatures, replay protections, key epochs, and membership t
 
 ## Deployment
 
-Target one API/worker application image plus PostgreSQL and durable volumes, behind HTTPS. Prefer compatibility with an existing reverse proxy while documenting a simple standalone option. The database must not be exposed publicly.
+The setup milestone implements one FastAPI/Uvicorn API with a background email worker, PostgreSQL and separate database/server-secret volumes, behind HTTPS. Only one application replica/worker is supported. The full-server prototype implements signed device membership, opaque per-recipient records, indexed latest state/history, capture-time retention and generic native push adapters. Prefer compatibility with an existing reverse proxy while documenting a simple standalone option. The database must not be exposed publicly.
 
 Email and push configuration need guided setup and diagnostics. Docker packaging alone does not eliminate those external setup requirements. TLS, backups, schema migrations, health checks, and upgrades are deliverables, not assumed behavior.
 
 ## Browser map
 
-A browser map requires a member's keys and authorization. JavaScript supplied by a compromised server can steal keys or plaintext when used, even if the database stores only ciphertext. Keep it out of the first prototype and resolve that threat explicitly before implementation.
+A browser map requires a member's keys and authorization. JavaScript supplied by a compromised server can steal keys or plaintext when used, even if the database stores only ciphertext. The browser reference client is now implemented with that explicit trust limitation. It cannot provide the same malicious-server boundary as a trusted native binary.

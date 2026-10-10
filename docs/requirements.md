@@ -36,12 +36,12 @@
 
 ## Deferred scope
 
-Android app, browser member map, expiring friend links, multiple households per client, public store distribution, and third-party bridges follow the two-iPhone prototype.
+Native Android app, expiring friend links, multiple households per client, public store distribution, and third-party bridges follow the two-iPhone prototype.
 
 Life360 publishing support is unverified. No core feature depends on an unofficial API. An eventual bridge requires a separate design and explicit disclosure that the recipient service gets the shared location.
 
 ## Decisions still open
 
-Backend language/framework; final cryptographic protocol and cross-platform library; map/tile provider and its privacy implications; retention default; key recovery; license; and treatment of sensitive versus public profile fields.
+Independent review of the prototype cryptographic format and native interoperability; native map provider; key recovery; license; and treatment of sensitive versus public profile fields.
 
-Swift/SwiftUI for iOS, Kotlin/Compose for Android, PostgreSQL, and Docker Compose are starting directions. Do not treat the backend stack or encryption library as selected yet.
+Swift/SwiftUI for iOS, Kotlin/Compose for Android, PostgreSQL, and Docker Compose are starting directions. FastAPI/PostgreSQL and a libsodium sealed-box/Ed25519 reference format now implement the server prototype; see server-protocol.md. Native implementation and independent security review remain required.

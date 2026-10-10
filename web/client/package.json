@@ -1,0 +1,21 @@
+{
+  "name": "family-stalker-web",
+  "version": "1.0.0",
+  "description": "",
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "node test_crypto.mjs"
+  },
+  "keywords": [],
+  "author": "",
+  "type": "module",
+  "dependencies": {
+    "leaflet": "1.9.4",
+    "libsodium-wrappers-sumo": "0.8.4"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2",
+    "playwright": "1.62.1"
+  },
+  "private": true
+}

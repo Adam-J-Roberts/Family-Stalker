@@ -1,38 +1,99 @@
 # Deployment
 
-The first image is a health-only development scaffold. It accepts no location writes, has no accounts/database, and provides no encryption or setup UI. Its HTTP server is temporary packaging infrastructure, not the future production API. Keep it private; no public exposure is needed for this test.
+This image runs the persistent setup website and account/email services. Compose also runs PostgreSQL; both services use durable volumes. It also serves the encrypted browser map and data relay. Native mobile background-tracking clients are not implemented.
 
 ## Publishing
 
-Merge the container PR into `main`. The Container workflow tests, validates Compose, builds and smoke-tests an unprivileged read-only container, then publishes:
+On a reviewed merge to `main`, the Container workflow runs SQLite and PostgreSQL checks, validates Compose, builds and smoke-tests a non-root read-only container, then publishes:
 
 - `ghcr.io/adam-j-roberts/family-stalker:latest`
 - `ghcr.io/adam-j-roberts/family-stalker:sha-<full-commit-sha>`
 
-Pull requests only validate and never publish. Manual workflow runs publish only when run against `main`. No separate registry secret is required: the publisher uses the workflow's short-lived GitHub token with `packages: write`.
+Pull requests validate without publishing. Manual workflow runs publish only from `main`. GitHub's short-lived workflow token supplies registry authentication.
 
-After the first successful publish, open the account's **Packages** tab, select `family-stalker`, and use **Package settings** to change visibility to **Public** for anonymous pulls. Repository visibility does not automatically make a newly published container public. If this step is skipped, pulls may report unauthorized or denied.
+For anonymous pulls, set the GitHub `family-stalker` package visibility to **Public** in its package settings. Public repository visibility does not automatically change package visibility. Publishing currently targets Linux AMD64; ARM64 and release tags remain future work. Base-image digest pinning and automated dependency updates also remain release-hardening work.
 
-Currently builds Linux AMD64 for NJServer. ARM64 publishing and numbered release tags are future additions. The Python base tag is refreshed during builds rather than digest-pinned; digest pinning and update automation remain release-hardening work.
+## Prepare NJServer
 
-## Run on NJServer
-
-Save [compose.yaml](compose.yaml) as `/opt/docker/family-stalker/compose.yaml`, then from that directory run:
+After merging this milestone and the publish workflow succeeding, save `compose.yaml` and `prepare.py` from this directory in `/opt/docker/family-stalker`. Run there:
 
 ```bash
+python3 prepare.py --url https://stalker.roberts.eco
+# Creates a private .env with a random database password; never overwrites it.
 docker compose pull
 docker compose up -d
 docker compose ps
 curl --fail http://127.0.0.1:8186/healthz
 ```
 
-Expected response: `{"status": "ok", "stage": "scaffold"}`. A healthy container only proves the packaging scaffold works, not that location sharing is implemented.
+Expected health: `{"status":"ok","stage":"setup","configured":false}` until setup completes. Both containers should become healthy.
 
-Port 8186 defaults to localhost on NJServer. For a deliberate LAN test, set `STALKER_BIND_ADDRESS` to NJServer's LAN IP in a local `.env` file. Check the port is free first; change `STALKER_PORT` if necessary. Do not forward this HTTP port to the internet.
+The application port defaults to localhost:8186. Put your HTTPS reverse proxy in front of it, forwarding the original `Host` header. Set the browser domain to the exact `STALKER_PUBLIC_URL`; mismatched Host or Origin is rejected. The application intentionally ignores forwarded IP headers. A proxy running in another container cannot reach the host's loopback: use an appropriately restricted host bind with `prepare.py --bind <NJServer-LAN-IP>` and the matching upstream address. Do not publish PostgreSQL or forward plain HTTP directly to the internet. The reverse proxy must obtain and renew the domain's TLS certificate.
 
-Update with `docker compose pull` followed by `docker compose up -d`. To pin or roll back, set `STALKER_TAG=sha-<full-commit-sha>` in `.env` to a previously published image tag, then repeat those commands. `latest` follows reviewed changes on `main`; it is a development channel today.
+For isolated LAN testing only, use `--url http://<NJServer-LAN-IP>:8186 --bind <NJServer-LAN-IP> --allow-http`. This explicitly disables secure-only cookies and transmits credentials without HTTPS. Switch to HTTPS before normal use.
 
-No persistent volume or database is needed for this scaffold. Those will be added with the real backend; backup/restore and migration instructions must accompany them.
+## First-run website
+
+1. Open the exact configured URL on your phone/computer.
+2. Retrieve the local token:
+
+   ```bash
+   docker compose exec stalker python manage.py bootstrap-token
+   ```
+
+3. Enter the token, household name, owner email/username and a password of at least 15 characters. Setup closes permanently and the token file is removed.
+4. Sign in. Configure your provider's SMTP hostname, port, TLS/STARTTLS, username, password and sender. Save, send a test to yourself, then confirm the administrator email.
+5. Invite a test member. Their email link lets them choose credentials and verify ownership. Alternatively, the sign-in page lets them request a fresh link using their invited email. Uninvited emails never create accounts.
+6. Run the [acceptance checklist](../docs/server-setup.md), including revocation and restart persistence. Email confirmation grants no encrypted device access. Open Household map, create the browser vault, then retrieve `docker compose exec stalker python manage.py device-bootstrap-token` to approve the first device. Invite another test browser, compare its fingerprint and the household root through a separate trusted channel, then approve it from the existing device.
+
+SMTP credentials and queued email bodies are encrypted with `/data/server.key`. Protect Docker access and backups: a host operator with both database and key can decrypt them. Provider app passwords may be required. The setup does not request Apple/Google push secrets until their services exist.
+
+## Updates and recovery
+
+```bash
+docker compose pull
+docker compose up -d
+```
+
+`latest` is the development channel. To pin an image, add `STALKER_TAG=sha-<full-commit-sha>` to `.env`. Roll back only to an image compatible with the database schema; the backend refuses unsupported versions. Do not revert to the old health-only Compose file after creating persistent setup data.
+
+A container restart/update preserves both volumes. `docker compose down` preserves them; **`docker compose down -v` destroys them**. Keep `.env` private and out of Git. Do not change its database password after initialization without also changing the PostgreSQL role password.
+
+Recover a forgotten owner password through local Docker access:
+
+```bash
+docker compose exec stalker python manage.py reset-owner-password
+```
+
+This prompts without echo, revokes existing owner sessions and does not approve devices or recover household encryption keys.
+
+## Backup and isolated restore
+
+Back up the database **and** server-data volume together. Restoring only the database loses SMTP/outbox decryption. Protect `.env` as well. Take the application offline briefly to prevent writes while making the pair:
+
+```bash
+umask 077
+mkdir -p backup
+docker compose stop stalker
+docker compose exec -T database pg_dump -U stalker -d stalker > backup/database.sql
+docker compose cp --archive stalker:/data backup/server-data
+cp .env backup/deployment.env
+docker compose start stalker
+```
+
+Check every command succeeds and keep the backup encrypted/off the server. Test restoration into an isolated, empty deployment using a different Compose project, bind port and private PUBLIC_URL. Do not run these restore commands on your current database:
+
+```bash
+# Use a separate directory containing compose.yaml and a prepared private .env.
+docker compose up -d database
+# Wait until the database is healthy before importing.
+docker compose exec -T database psql -v ON_ERROR_STOP=1 -U stalker -d stalker < backup/database.sql
+docker compose create stalker
+docker compose cp --archive backup/server-data/. stalker:/data
+docker compose up -d stalker
+```
+
+Archived copying preserves the server volume's UID/GID (10001) and private permissions. Copy the key before starting the app; it fails closed if a schema exists but the key is missing. Keep restored SMTP from delivering old pending invitations during a restore test (use an isolated network/test mail server or clear pending delivery state in the disposable database). Confirm login/settings survive, then test delivery with your test account. Automated backups and schema upgrades are separate future work.
 
 ## Build locally
 
@@ -40,6 +101,20 @@ From the repository root:
 
 ```bash
 docker build -t family-stalker:local .
-docker run --rm --read-only --cap-drop ALL --security-opt no-new-privileges:true \
-  -p 127.0.0.1:8186:8080 family-stalker:local
+STALKER_PUBLIC_URL=https://stalker.example.invalid STALKER_DB_PASSWORD=synthetic-build-only \
+  docker compose -f deploy/compose.yaml config --quiet
 ```
+
+For actual deployment use `prepare.py` to generate unique secrets. Never reuse the synthetic example password.
+
+## Full-server acceptance
+
+Read [server protocol](../docs/server-protocol.md) before real location use. Add an approved second browser, publish **synthetic** locations from the first, and verify both display the decrypted update. A pending browser must not read it. Test saved places, profiles, history, pause/resume, and member/device revocation. New devices receive future updates; use the reshare-places button after approval. A member revoked through account administration must also be removed from the signed roster through the map's reconciliation button before further publication.
+
+In Server settings, history defaults to 14 days and can be reduced. Place/profile state persists. The cleanup button and `docker compose exec stalker python manage.py cleanup` trigger expiry processing. `STALKER_STORAGE_QUOTA_MIB` optionally sets the ciphertext budget (default 512); total PostgreSQL usage includes indexes/WAL and may be larger. Keep backups on their own 14-day expiry policy if you want that cap for all retained GPS copies.
+
+Optional APNs configuration needs your Apple developer team/key IDs, .p8 key, native bundle ID and sandbox/production selection. Optional FCM needs a Firebase service-account JSON. These are encrypted at rest and never returned in settings responses. Neither provider receives readable GPS/place data. Real delivery needs a native app with a registered token; the browser's encrypted event test validates server flow without pretending to be native push.
+
+Schema 1→2 is an additive migration under the initial version guard; it preserves accounts/mail settings and creates the relay/device tables. Back up both volumes before upgrading. Older images cannot run against schema 2; restore their matching database backup to roll back. Schema migration supports a single application worker/replica only.
+
+If every trusted device is lost, first seek approval from another trusted household device. Otherwise the local `reset-encryption` command requires typed destructive confirmation, deletes all encrypted data/device state, and starts a new household cryptographic identity. It preserves account/mail administration and cannot recover past locations. Run it only after a backup, with no concurrent browser/client activity; this is a last-resort local recovery tool, not email recovery.

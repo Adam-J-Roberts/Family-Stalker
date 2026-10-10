@@ -34,3 +34,10 @@ backups/
 *.sqlite3
 *.db
 *.log
+
+# Generated browser bundle (built in Docker and CI)
+services/backend/static/client.js*
+services/backend/static/leaflet.css
+services/backend/static/images/
+services/backend/static/*-LICENSE
+services/backend/static/client-versions.json
