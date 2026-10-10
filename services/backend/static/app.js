@@ -4,6 +4,15 @@ const view = document.getElementById('view');
 const message = document.getElementById('message');
 const logout = document.getElementById('logout');
 function notice(text) { message.textContent = text; }
+function selectSection(section) {
+  for (const name of ['map', 'settings']) {
+    const button = document.getElementById(`open-${name}`);
+    const selected = name === section;
+    button.classList.toggle('secondary', !selected);
+    if (selected) button.setAttribute('aria-current', 'page');
+    else button.removeAttribute('aria-current');
+  }
+}
 function escapeHTML(text) { const el = document.createElement('span'); el.textContent = text || ''; return el.innerHTML; }
 async function api(path, method = 'GET', body, extraHeaders = {}) {
   const headers = {...extraHeaders};
@@ -59,6 +68,7 @@ async function verification(token) {
   bind('verify', async data => { await api('/api/enrollment/verify','POST',{token,username:data.username || null,password:data.password || null}); token = ''; await login(); notice('Email confirmed. Open Household map to enroll your device; trusted-device approval is a separate step.'); });
 }
 async function dashboard(user) {
+  selectSection('settings');
   if (user.role !== 'admin') {
     view.innerHTML = `<section class="card"><h2>Your account is ready.</h2><p class="subtle">Signed in as ${escapeHTML(user.username)}. Open the household map to enroll and approve this browser. Email verification does not approve its encryption keys.</p></section>`;
     return;
@@ -112,7 +122,7 @@ async function load() {
   try {user=await api('/api/session');}catch(e){return login();}
   csrf=user.csrf; logout.hidden=false;
   document.getElementById('app-nav').hidden=false;
-  document.getElementById('open-map').onclick=async()=>{try{await window.FamilyClient.mount({api,user,notice,view});}catch(e){notice(e.message);}};
+  document.getElementById('open-map').onclick=async()=>{try{selectSection('map');await window.FamilyClient.mount({api,user,notice,view});}catch(e){notice(e.message);}};
   document.getElementById('open-settings').onclick=async()=>{window.FamilyClient?.lock();try{await dashboard(user);}catch(e){notice(e.message);}};
   await dashboard(user);
 }
