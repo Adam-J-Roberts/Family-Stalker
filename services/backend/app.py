@@ -477,15 +477,18 @@ def create_app(database_url=None, data_dir=None, public_url=None, allow_http=Non
         return {"configured": True, **config}
 
     @app.put("/api/mail")
-    def save_mail(body: MailInput, auth=Depends(admin), db: Session = Depends(database)):
+    def save_mail(body: MailInput, request: Request, auth=Depends(admin), db: Session = Depends(database)):
         if not re.fullmatch(r"[a-zA-Z0-9.-]+", body.host):
             raise HTTPException(422, "Use an SMTP hostname or IP")
-        settings = db.get(Settings, 1)
+        settings = db.execute(select(Settings).where(Settings.id == 1).with_for_update()).scalar_one()
         previous = mail_settings(db) if settings.smtp else {}
         config = body.model_dump()
         config["sender"] = email_address(body.sender)
         config["password"] = body.password if body.password is not None else previous.get("password", "")
-        settings.smtp, settings.mail_tested = cipher.encrypt(json.dumps(config).encode()).decode(), False
+        if config != previous:
+            settings.smtp, settings.mail_tested = cipher.encrypt(json.dumps(config).encode()).decode(), False
+            key = digest(f"{request.client.host}:mail")
+            db.query(Rate).filter(Rate.id == key).delete()
         db.commit()
         return {"saved": True}
 
