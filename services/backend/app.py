@@ -19,7 +19,7 @@ from argon2.exceptions import VerificationError
 from cryptography.fernet import Fernet, InvalidToken
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import Boolean, Float, Integer, String, Text, create_engine, select
 from sqlalchemy.exc import SQLAlchemyError
@@ -161,12 +161,13 @@ def secret_file(path, generator):
     return value
 
 
-def create_app(database_url=None, data_dir=None, public_url=None, allow_http=None, mailer=None, mail_worker=True, notifier=None):
+def create_app(database_url=None, data_dir=None, public_url=None, allow_http=None, mailer=None, mail_worker=True, notifier=None, google_maps_api_key=None):
     from data_service import ServiceState, initialize_service, install, revoke_account_data
     database_url = database_url or os.environ["DATABASE_URL"]
     directory = Path(data_dir or os.environ.get("STALKER_DATA_DIR", "/data"))
     public_url = (public_url or os.environ["STALKER_PUBLIC_URL"]).rstrip("/")
     allow_http = allow_http if allow_http is not None else os.environ.get("STALKER_ALLOW_HTTP") == "1"
+    maps_key = (google_maps_api_key if google_maps_api_key is not None else os.environ.get("STALKER_GOOGLE_MAPS_API_KEY", "")).strip()
     url = urlsplit(public_url)
     if (url.scheme not in ("http", "https") or not url.hostname or url.username
             or url.password or url.path or url.query or url.fragment
@@ -275,11 +276,23 @@ def create_app(database_url=None, data_dir=None, public_url=None, allow_http=Non
                     return JSONResponse({"detail": "Request size rejected"}, 413)
                 if not request.headers.get("content-type", "").startswith("application/json"):
                     return JSONResponse({"detail": "JSON required"}, 415)
+        request.state.maps_nonce = secrets.token_urlsafe(24) if maps_key else ""
         response = await call_next(request)
         response.headers["Cache-Control"] = "no-store"
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "no-referrer"
         response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://tile.openstreetmap.org; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
+        if maps_key:
+            # Nonces let Google's loader create its scripts without allowing inline scripts.
+            response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+            response.headers["Content-Security-Policy"] = (
+                f"default-src 'self'; script-src 'nonce-{request.state.maps_nonce}' 'strict-dynamic' 'unsafe-eval' https: blob:; "
+                "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+                "img-src 'self' data: blob: https://tile.openstreetmap.org https://*.googleapis.com https://*.gstatic.com https://*.google.com https://*.googleusercontent.com; "
+                "connect-src 'self' https://*.googleapis.com https://*.gstatic.com https://*.google.com data: blob:; "
+                "font-src 'self' https://fonts.gstatic.com; frame-src https://*.google.com; worker-src blob:; "
+                "frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
+            )
         if url.scheme == "https":
             response.headers["Strict-Transport-Security"] = "max-age=31536000"
         return response
@@ -581,8 +594,17 @@ def create_app(database_url=None, data_dir=None, public_url=None, allow_http=Non
     assets = Path(__file__).parent / "static"
 
     @app.get("/")
-    def index():
+    def index(request: Request):
+        if maps_key:
+            html = (assets / "index.html").read_text()
+            html = html.replace("<script ", f'<script nonce="{request.state.maps_nonce}" ')
+            html = html.replace("</head>", f'<style nonce="{request.state.maps_nonce}"></style></head>')
+            return HTMLResponse(html)
         return FileResponse(assets / "index.html")
+
+    @app.get("/api/maps")
+    def map_configuration(account=Depends(current)):
+        return {"provider": "google" if maps_key else "openstreetmap", "api_key": maps_key}
 
     @app.get("/app.js")
     def javascript():
