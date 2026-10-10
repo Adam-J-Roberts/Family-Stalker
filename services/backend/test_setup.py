@@ -12,7 +12,7 @@ from unittest.mock import patch, MagicMock
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
-from app import Account, Base, Challenge, Device, HASHER, LoginSession, Outbox, Settings, create_app, digest
+from app import Account, Base, Challenge, Device, HASHER, LoginSession, Outbox, Rate, Settings, create_app, digest
 
 PASSWORD = "synthetic long test password"
 PUBLIC = "https://stalker.example.invalid"
@@ -180,6 +180,46 @@ class SetupTests(unittest.TestCase):
         self.client.put("/api/mail", json=changed)
         self.assertEqual(self.client.post("/api/mail/test", json={}).status_code, 200)
         self.assertEqual(self.messages[-1][0]["password"], MAIL["password"])
+
+    def test_changed_smtp_settings_reset_mail_cooldown(self):
+        self.configure()
+        changes = {
+            "host": "corrected.example.invalid", "port": 465, "mode": "tls",
+            "username": "corrected-user", "password": "corrected-secret",
+            "sender": "corrected@example.invalid",
+        }
+        config = dict(MAIL)
+        self.assertEqual(self.client.post("/api/mail/retry", json={}).status_code, 200)
+        with Session(self.app.state.engine) as db:
+            db.add(Rate(id=digest("other-client:mail"), started=time.time(), count=10))
+            db.commit()
+        for field, value in changes.items():
+            with self.subTest(field=field):
+                for _ in range(9):
+                    self.assertEqual(self.client.post("/api/mail/test", json={}).status_code, 200)
+                self.assertEqual(self.client.post("/api/mail/test", json={}).status_code, 429)
+                self.assertEqual(self.client.post("/api/mail/retry", json={}).status_code, 429)
+                config[field] = value
+                self.assertEqual(self.client.put("/api/mail", json=config).status_code, 200)
+                # Changing SMTP settings must not clear login or other clients' limits.
+                with Session(self.app.state.engine) as db:
+                    self.assertEqual(db.get(Rate, digest("testclient:login")).count, 1)
+                    self.assertEqual(db.get(Rate, digest("other-client:mail")).count, 10)
+                self.assertEqual(self.client.post("/api/mail/retry", json={}).status_code, 200)
+
+    def test_unchanged_or_invalid_smtp_settings_keep_mail_cooldown(self):
+        self.configure()
+        for _ in range(10):
+            self.assertEqual(self.client.post("/api/mail/test", json={}).status_code, 200)
+        for config, status in (
+                (MAIL, 200), ({**MAIL, "password": None}, 200),
+                ({**MAIL, "mode": "plain"}, 422),
+                ({**MAIL, "host": "bad host"}, 422)):
+            with self.subTest(config=config):
+                self.assertEqual(self.client.put("/api/mail", json=config).status_code, status)
+                self.assertEqual(self.client.post("/api/mail/test", json={}).status_code, 429)
+        with Session(self.app.state.engine) as db:
+            self.assertTrue(db.get(Settings, 1).mail_tested)
 
     def test_smtp_must_use_tls_and_header_injection_rejected(self):
         self.configure()
