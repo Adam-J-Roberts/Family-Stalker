@@ -1,0 +1,41 @@
+name: Android
+on:
+  pull_request:
+    paths: ['apps/android/**', '.github/workflows/android.yaml']
+  push:
+    branches: [main]
+    paths: ['apps/android/**', '.github/workflows/android.yaml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      matrix:
+        provider: [openstreetmap, google]
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407
+        with:
+          packages: 'platform-tools platforms;android-36 build-tools;35.0.0'
+      - name: Compile and test
+        working-directory: apps/android
+        env:
+          STALKER_GOOGLE_MAPS_ANDROID_API_KEY: ${{ matrix.provider == 'google' && 'synthetic-ci-key-not-for-device-use' || '' }}
+        run: |
+          if [ '${{ matrix.provider }}' = 'google' ]; then variant=Google; else variant=Osm; fi
+          bash gradlew :app:assembleDebug ":app:test${variant}DebugUnitTest" ":app:lint${variant}Debug" --no-daemon
+      - name: Upload installable OpenStreetMap debug APK
+        if: matrix.provider == 'openstreetmap'
+        uses: actions/upload-artifact@v4
+        with:
+          name: family-stalker-android-debug
+          path: apps/android/app/build/outputs/apk/osm/debug/app-osm-debug.apk
+          if-no-files-found: error
