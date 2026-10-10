@@ -290,8 +290,24 @@ def create_app(database_url=None, data_dir=None, public_url=None, allow_http=Non
 
     @app.exception_handler(RequestValidationError)
     async def validation_error(request, error):
-        # Pydantic's default response can echo submitted passwords/tokens.
-        return JSONResponse({"detail": "Please check the required fields and their lengths"}, 422)
+        # Return field constraints, never Pydantic's submitted input or context objects.
+        fields = []
+        for issue in error.errors():
+            location = [str(part) for part in issue["loc"] if part != "body"]
+            kind, context = issue["type"], issue.get("ctx", {})
+            message = "Enter a valid value."
+            if kind == "missing":
+                message = "This field is required."
+            elif kind == "string_too_short":
+                message = f"Use at least {context['min_length']} characters."
+            elif kind == "string_too_long":
+                message = f"Use no more than {context['max_length']} characters."
+            elif kind == "string_pattern_mismatch":
+                message = "Check the allowed characters."
+            elif kind == "json_invalid":
+                message = "The request must contain valid JSON."
+            fields.append({"field": ".".join(location), "message": message})
+        return JSONResponse({"detail": "Please correct the highlighted fields.", "fields": fields}, 422)
 
     def database():
         with Session(engine) as db:
