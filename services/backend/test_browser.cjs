@@ -40,6 +40,18 @@ const assert = require('node:assert/strict');
     await page.getByLabel('Administrator email', {exact:true}).fill('owner@example.invalid');
     await page.getByLabel('Username', {exact:true}).fill('owner');
     await page.getByLabel('Administrator password · at least 15 characters', {exact:true}).fill('synthetic long test password');
+    await page.getByRole('button', {name:'Show Administrator password · at least 15 characters',exact:true}).click();
+    assert.equal(await page.locator('#setup [name=password]').getAttribute('type'),'text');
+    await page.getByRole('button', {name:'Hide Administrator password · at least 15 characters',exact:true}).click();
+    assert.equal(await page.locator('#setup [name=password]').getAttribute('type'),'password');
+    await page.route('**/api/setup', async route => {
+      if(route.request().method() !== 'POST') return route.continue();
+      await route.fulfill({status:422,contentType:'application/json',body:JSON.stringify({detail:'Please correct the highlighted fields.',fields:[{field:'token',message:'Use at least 20 characters.'}]})});
+    });
+    await page.getByRole('button', {name:'Create household',exact:true}).click();
+    await page.locator('#setup-token-error').getByText('Use at least 20 characters.',{exact:true}).waitFor();
+    assert.equal(await page.locator('#setup [name=token]').getAttribute('aria-invalid'),'true');
+    await page.unroute('**/api/setup');
     await page.getByRole('button', {name:'Create household',exact:true}).click();
     await page.getByRole('heading', {name:'Welcome home.'}).waitFor();
     await assert.rejects(fs.access(path.join(directory,'bootstrap-token')));

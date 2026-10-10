@@ -11,24 +11,39 @@ async function api(path, method = 'GET', body, extraHeaders = {}) {
   if (body !== undefined) headers['Content-Type'] = 'application/json';
   const response = await fetch(path, {method, headers, credentials: 'same-origin', body: body === undefined ? undefined : JSON.stringify(body)});
   const data = await response.json();
-  if (!response.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'Please check the fields and try again.');
+  if (!response.ok) { const error = new Error(typeof data.detail === 'string' ? data.detail : 'Please check the fields and try again.'); error.fields = data.fields || []; throw error; }
   return data;
 }
 function bind(id, task) {
   document.getElementById(id).addEventListener('submit', async event => {
     event.preventDefault(); notice('');
-    const form = event.currentTarget, button = form.querySelector('button[type="submit"]');
+    const form = event.currentTarget;
+    form.querySelectorAll('.field-error').forEach(el => el.remove());
+    form.querySelectorAll('[aria-invalid]').forEach(el => { el.removeAttribute('aria-invalid'); el.removeAttribute('aria-describedby'); });
+    const button = form.querySelector('button[type="submit"]');
     if (button) button.disabled = true;
     try { await task(Object.fromEntries(new FormData(form)), form); }
-    catch (error) { notice(error.message); }
+    catch (error) {
+      let first;
+      for (const issue of error.fields || []) {
+        const input = form.elements.namedItem(issue.field);
+        if (!input || !input.tagName) continue;
+        const hint = document.createElement('p'); hint.className = 'field-error';
+        hint.id = `${form.id}-${input.name}-error`; hint.textContent = issue.message;
+        input.setAttribute('aria-invalid', 'true'); input.setAttribute('aria-describedby', hint.id);
+        (input.closest('.secret-control') || input).after(hint); first ||= input;
+      }
+      notice(error.message); first?.focus();
+    }
     finally { if (button) button.disabled = false; }
   });
 }
 function field(name, label, type = 'text', extra = '') {
-  return `<label for="${name}">${label}</label><input id="${name}" name="${name}" type="${type}" ${extra}>`;
+  const input = `<input id="${name}" name="${name}" type="${type}" ${extra}>`;
+  return `<label for="${name}">${label}</label>` + (type === 'password' ? `<div class="secret-control">${input}<button type="button" class="secondary secret-toggle" aria-label="Show ${label}" aria-pressed="false">Show</button></div>` : input);
 }
 function setup() {
-  view.innerHTML = `<section class="card"><p class="eyebrow">01 / CREATE YOUR HOUSEHOLD</p><h2>Make this server yours.</h2><p class="subtle">Retrieve the one-time setup token from Docker. It prevents someone else claiming your server.</p><code>docker compose exec stalker python manage.py bootstrap-token</code><form id="setup">${field('token','Setup token','password','required autocomplete="off"')}${field('household','Household name','text','required maxlength="80"')}${field('email','Administrator email','email','required autocomplete="email"')}${field('username','Username','text','required pattern="[a-zA-Z0-9_.-]{3,64}" autocomplete="username"')}${field('password','Administrator password · at least 15 characters','password','required minlength="15" maxlength="128" autocomplete="new-password"')}<button type="submit">Create household</button></form></section>`;
+  view.innerHTML = `<section class="card"><p class="eyebrow">01 / CREATE YOUR HOUSEHOLD</p><h2>Make this server yours.</h2><p class="subtle">Enter the setup token from your Docker configuration, or retrieve the generated token using the command below.</p><code>docker compose exec stalker python manage.py bootstrap-token</code><form id="setup">${field('token','Setup token','password','required minlength="8" maxlength="256" autocomplete="off"')}${field('household','Household name','text','required maxlength="80"')}${field('email','Administrator email','email','required autocomplete="email"')}${field('username','Username','text','required pattern="[a-zA-Z0-9_.-]{3,64}" autocomplete="username"')}${field('password','Administrator password · at least 15 characters','password','required minlength="15" maxlength="128" autocomplete="new-password"')}<button type="submit">Create household</button></form></section>`;
   bind('setup', async (data, form) => { await api('/api/setup', 'POST', data); form.reset(); await login(); notice('Household created. Sign in to finish email setup.'); });
 }
 async function login() {
@@ -41,7 +56,7 @@ async function login() {
 async function verification(token) {
   history.replaceState(null, '', '/');
   view.innerHTML = `<section class="card"><h2>Confirm your email.</h2><p class="subtle">New members: choose your username and password. Existing administrator: leave these blank to confirm your email without changing your password.</p><form id="verify">${field('username','Username (new members only)','text','pattern="[a-zA-Z0-9_.-]{3,64}" autocomplete="username"')}${field('password','Password (new members only)','password','minlength="15" maxlength="128" autocomplete="new-password"')}<button type="submit">Confirm email</button></form></section>`;
-  bind('verify', async data => { await api('/api/enrollment/verify','POST',{token,username:data.username || null,password:data.password || null}); token = ''; await login(); notice('Email confirmed. Secure device approval is a separate step and is not available yet.'); });
+  bind('verify', async data => { await api('/api/enrollment/verify','POST',{token,username:data.username || null,password:data.password || null}); token = ''; await login(); notice('Email confirmed. Open Household map to enroll your device; trusted-device approval is a separate step.'); });
 }
 async function dashboard(user) {
   if (user.role !== 'admin') {
@@ -104,3 +119,13 @@ async function load() {
 logout.onclick=async()=>{try{await api('/api/logout','POST',{});csrf='';notice('');await load();}catch(e){notice(e.message);}};
 const token = new URLSearchParams(location.hash.slice(1)).get('verify');
 (token?verification(token):load()).catch(error=>notice(error.message));
+
+view.addEventListener('click', event => {
+  const button = event.target.closest('.secret-toggle');
+  if (!button) return;
+  const input = button.parentElement.querySelector('input');
+  const visible = input.type === 'password'; input.type = visible ? 'text' : 'password';
+  button.textContent = visible ? 'Hide' : 'Show'; button.setAttribute('aria-pressed', String(visible));
+  const label = input.labels?.[0]?.textContent || 'password';
+  button.setAttribute('aria-label', `${visible ? 'Hide' : 'Show'} ${label}`);
+});

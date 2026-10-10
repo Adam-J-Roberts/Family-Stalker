@@ -111,6 +111,7 @@ class SetupTests(unittest.TestCase):
         result = self.client.post("/api/setup", json={"token": self.token, "household": "test", "email": OWNER, "username": "test", "password": "short-secret"})
         self.assertEqual(result.status_code, 422)
         self.assertNotIn("short-secret", result.text)
+        self.assertIn({"field": "password", "message": "Use at least 15 characters."}, result.json()["fields"])
 
     def test_persistence_and_key_loss_fail_closed(self):
         self.configure()
