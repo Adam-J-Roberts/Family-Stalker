@@ -101,7 +101,7 @@ class Input(BaseModel):
 
 
 class SetupInput(Input):
-    token: str = Field(min_length=20, max_length=128)
+    token: str = Field(min_length=8, max_length=256)
     household: str = Field(min_length=1, max_length=80)
     email: str = Field(min_length=3, max_length=254)
     username: str = Field(min_length=3, max_length=64)
