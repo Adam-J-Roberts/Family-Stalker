@@ -101,7 +101,7 @@ class Input(BaseModel):
 
 
 class SetupInput(Input):
-    token: str = Field(min_length=20, max_length=128)
+    token: str = Field(min_length=8, max_length=256)
     household: str = Field(min_length=1, max_length=80)
     email: str = Field(min_length=3, max_length=254)
     username: str = Field(min_length=3, max_length=64)
@@ -198,6 +198,19 @@ def create_app(database_url=None, data_dir=None, public_url=None, allow_http=Non
                 connection.execute(text("UPDATE settings SET version=2 WHERE id=1"))
         with Session(engine) as db:
             settings = db.get(Settings, 1)
+            configured_token = (os.environ.get("STALKER_SETUP_TOKEN") or None) if not settings or not settings.household else None
+            if configured_token is not None:
+                if not 8 <= len(configured_token) <= 256 or configured_token.strip() != configured_token:
+                    raise ValueError("STALKER_SETUP_TOKEN must contain 8–256 characters without surrounding whitespace")
+                # Explicit deployment configuration can replace an unclaimed token.
+                # Completed setup never reads, restores or applies this value.
+                fd = os.open(bootstrap_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+                with os.fdopen(fd, "w") as f:
+                    f.write(configured_token)
+                bootstrap_file.chmod(0o600)
+                if settings:
+                    settings.bootstrap_hash = digest(configured_token)
+                    db.commit()
             if settings is None:
                 token = secret_file(bootstrap_file, lambda: secrets.token_urlsafe(32))
                 db.add(Settings(id=1, bootstrap_hash=digest(token)))

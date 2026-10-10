@@ -73,6 +73,34 @@ class SetupTests(unittest.TestCase):
             self.assertTrue(HASHER.verify(account.password, PASSWORD))
             self.assertIsNone(db.get(Settings, 1).bootstrap_hash)
 
+    def test_configured_token_replaces_unclaimed_token_and_cannot_reopen_setup(self):
+        with patch.dict(os.environ, {"STALKER_SETUP_TOKEN": "family-test"}):
+            self.app.state.initialize()
+            self.assertEqual((self.path / "bootstrap-token").read_text(), "family-test")
+            self.assertEqual((self.path / "bootstrap-token").stat().st_mode & 0o777, 0o600)
+            self.assertEqual(self.setup_owner().status_code, 403)
+            self.token = "family-test"
+            self.assertEqual(self.setup_owner().status_code, 201)
+            self.app.state.initialize()
+            self.assertFalse((self.path / "bootstrap-token").exists())
+            self.assertEqual(self.setup_owner().status_code, 409)
+
+    def test_configured_token_on_fresh_install(self):
+        with tempfile.TemporaryDirectory() as directory:
+            database_url = "sqlite:///" + directory + "/fresh.db"
+            with patch.dict(os.environ, {"STALKER_SETUP_TOKEN": "fresh-test-token"}):
+                app = create_app(database_url, directory, PUBLIC, mail_worker=False)
+                with TestClient(app, base_url=PUBLIC) as client:
+                    result = client.post("/api/setup", headers={"Origin": PUBLIC}, json={"token": "fresh-test-token", "household": "Fresh", "email": OWNER, "username": "owner", "password": PASSWORD})
+                    self.assertEqual(result.status_code, 201)
+
+    def test_invalid_configured_token_does_not_replace_existing_token(self):
+        with patch.dict(os.environ, {"STALKER_SETUP_TOKEN": "short"}):
+            with self.assertRaises(ValueError):
+                self.app.state.initialize()
+        self.assertEqual((self.path / "bootstrap-token").read_text(), self.token)
+        self.assertEqual(self.setup_owner().status_code, 201)
+
     def test_wrong_token_origin_host_and_weak_password(self):
         self.token = "wrong" * 8
         self.assertEqual(self.setup_owner().status_code, 403)

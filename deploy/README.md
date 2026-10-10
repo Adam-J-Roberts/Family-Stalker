@@ -34,6 +34,15 @@ For isolated LAN testing only, use `--url http://<NJServer-LAN-IP>:8186 --bind <
 
 ## First-run website
 
+### Optional configured setup token
+
+Set `STALKER_SETUP_TOKEN` in the Compose environment to choose the first-run setup token, for example `STALKER_SETUP_TOKEN: "family-test"` for an isolated test. Omit it or leave it empty to keep the generated token. Use a unique random value for normal deployments. The value must contain 8–256 characters without surrounding whitespace.
+
+An explicitly configured value replaces the token on restart **only while setup is unfinished**, including an existing unclaimed deployment. Once the household/administrator is created, setup remains closed regardless of this variable. Remove it from your configuration after setup. It does not replace the separate encrypted-device bootstrap token.
+
+For local-first setup, bind the application port to the server's LAN address and restrict access with your firewall. Do not forward it publicly until setup is complete. Docker/reverse proxies can mask the original client IP, so the application does not claim that a private source IP proves a request originated locally. Later server administration remains available to authenticated administrators at the configured URL.
+
+
 1. Open the exact configured URL on your phone/computer.
 2. Retrieve the local token:
 
