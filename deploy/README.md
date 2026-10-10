@@ -57,6 +57,22 @@ For local-first setup, bind the application port to the server's LAN address and
 
 SMTP credentials and queued email bodies are encrypted with `/data/server.key`. Protect Docker access and backups: a host operator with both database and key can decrypt them. Provider app passwords may be required. The setup does not request Apple/Google push secrets until their services exist.
 
+## Optional Google Maps
+
+The browser defaults to OpenStreetMap without a Google key. To select Google Maps, add this under the **stalker** service's `environment` in your Compose/Portainer YAML:
+
+```yaml
+      STALKER_GOOGLE_MAPS_API_KEY: "YOUR_GOOGLE_MAPS_API_KEY"
+```
+
+The supplied Compose file also accepts `STALKER_GOOGLE_MAPS_API_KEY` from `.env`. Leave it blank (`""`) or omit it to use OpenStreetMap. Recreate the application container after changing this setting; existing browser vaults and encrypted data remain valid.
+
+Enable **Maps JavaScript API** in a Google Cloud project with billing enabled. Restrict the key to **Maps JavaScript API** and HTTP website referrers such as `https://stalker.roberts.eco/*` (add each actual deployment domain). This is a browser key and is visible to signed-in users; apply domain/API restrictions and appropriate quotas. Google billing applies above its current free allowance; OpenStreetMap needs no API key and follows its public tile usage policy.
+
+After unlocking an approved device, select **Load Google Maps** or **Load OpenStreetMap tiles**. Neither provider is contacted before that choice. The selected provider receives the viewed region and normal browser network metadata. Google gets the map coordinates required to display it; household records still decrypt in the browser. Names/photos are DOM overlays rather than data submitted to a Google location service. An unsuccessful Google load displays an error and offers **Use OpenStreetMap instead**. Refreshes update existing map markers rather than constructing a new Google map. Locking and reopening, or leaving and returning to the map, requires a new explicit load and may count as another billable Google map load.
+
+Provider references: [Google setup](https://developers.google.com/maps/documentation/javascript/get-api-key), [Google pricing](https://developers.google.com/maps/billing-and-pricing/pricing), [OpenStreetMap tile policy](https://operations.osmfoundation.org/policies/tiles/).
+
 ## Updates and recovery
 
 ```bash
