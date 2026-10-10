@@ -49,6 +49,7 @@ jobs:
         run: |
           node web/client/node_modules/playwright/cli.js install --with-deps chromium
           node services/backend/test_browser.cjs
+          STALKER_TEST_MAP_PROVIDER=google node services/backend/test_browser.cjs
       - name: Validate Compose
         env:
           STALKER_PUBLIC_URL: https://stalker.example.invalid
