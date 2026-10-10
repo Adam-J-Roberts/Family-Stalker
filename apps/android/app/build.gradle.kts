@@ -28,10 +28,19 @@ android {
         buildConfigField("String", "DEFAULT_SERVER_URL", literal(setting("STALKER_SERVER_URL")))
         buildConfigField("String", "MAP_PROVIDER", literal(if (googleEnabled) "google" else "openstreetmap"))
     }
-    sourceSets["main"].java.srcDir(if (googleEnabled) "src/google/kotlin" else "src/osm/kotlin")
+    flavorDimensions += "maps"
+    productFlavors {
+        create("osm") { dimension = "maps" }
+        create("google") { dimension = "maps" }
+    }
     buildFeatures { compose = true; buildConfig = true }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
-    kotlinOptions { jvmTarget = "17" }
+}
+kotlin { compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17) } }
+androidComponents {
+    beforeVariants { variant ->
+        variant.enable = variant.productFlavors.any { it.second == if (googleEnabled) "google" else "osm" }
+    }
 }
 
 dependencies {
@@ -42,8 +51,8 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.9.4")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
-    if (googleEnabled) implementation("com.google.android.gms:play-services-maps:19.2.0")
-    else implementation("org.maplibre.gl:android-sdk:11.13.0")
+    "googleImplementation"("com.google.android.gms:play-services-maps:19.2.0")
+    "osmImplementation"("org.maplibre.gl:android-sdk:11.13.0")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")
     testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")

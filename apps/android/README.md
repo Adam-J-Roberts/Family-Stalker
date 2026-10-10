@@ -28,10 +28,10 @@ The server address is optional; enter it on the sign-in screen instead. Only the
 Build the default map app:
 
 ```bash
-./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug
+./gradlew :app:assembleDebug :app:testOsmDebugUnitTest :app:lintOsmDebug
 ```
 
-On Windows use `gradlew.bat`. The APK is `app/build/outputs/apk/debug/app-debug.apk`. Install through Android Studio or `adb install -r app/build/outputs/apk/debug/app-debug.apk`. Minimum Android version: 8.0 (API 26). Debug installs require approval for the installing source. Release signing and Play Store distribution are separate work.
+On Windows use `gradlew.bat`. The APK is `app/build/outputs/apk/osm/debug/app-osm-debug.apk`. Install through Android Studio or `adb install -r app/build/outputs/apk/osm/debug/app-osm-debug.apk`. Minimum Android version: 8.0 (API 26). Debug installs require approval for the installing source. Release signing and Play Store distribution are separate work.
 
 GitHub's **Android** workflow builds both provider selections and publishes an installable **family-stalker-android-debug** artifact for the OpenStreetMap build. The Google CI key is synthetic and cannot display real Google maps.
 
@@ -45,7 +45,9 @@ Set `STALKER_GOOGLE_MAPS_ANDROID_API_KEY` in this project's `.env` to a key with
 
 A CI debug APK uses a different signing certificate from a local Android Studio debug APK. Register the matching certificate, or use a stable release signing identity later. This Android key is separate from the browser key and its website restrictions. It is embedded in the manifest, so Google restrictions matter; never commit a populated `.env`.
 
-A blank/absent key compiles only the MapLibre adapter and dependency. A nonempty key compiles only the Google adapter and dependency. Environment variables override `.env` values (CI uses this). Provider/key changes require rebuilding and reinstalling the APK; editing Docker's `.env` does not change an installed Android map SDK. An invalid Google key may produce a blank map; the UI reports a load timeout. Remove the key and rebuild to return to OpenStreetMap.
+For a configured Google build, use `:app:testGoogleDebugUnitTest :app:lintGoogleDebug` for its checks. Its APK is `app/build/outputs/apk/google/debug/app-google-debug.apk`.
+
+A blank/absent key compiles only the MapLibre adapter and dependency. A nonempty key compiles only the Google adapter and dependency. Environment variables override `.env` values (CI uses this). Provider/key changes require a clean rebuild (`./gradlew clean :app:assembleDebug`) and reinstalling the APK; editing Docker's `.env` does not change an installed Android map SDK. An invalid Google key may produce a blank map; the UI reports a load timeout. Remove the key and rebuild to return to OpenStreetMap.
 
 OpenStreetMap attribution remains visible. Requests use an app-specific User-Agent and HTTP cache, and no bulk download/prefetch feature is provided. Public tiles are a best-effort service under the [tile usage policy](https://operations.osmfoundation.org/policies/tiles/).
 

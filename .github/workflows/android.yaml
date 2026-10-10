@@ -27,11 +27,13 @@ jobs:
         working-directory: apps/android
         env:
           STALKER_GOOGLE_MAPS_ANDROID_API_KEY: ${{ matrix.provider == 'google' && 'synthetic-ci-key-not-for-device-use' || '' }}
-        run: bash gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug --no-daemon
+        run: |
+          if [ '${{ matrix.provider }}' = 'google' ]; then variant=Google; else variant=Osm; fi
+          bash gradlew :app:assembleDebug ":app:test${variant}DebugUnitTest" ":app:lint${variant}Debug" --no-daemon
       - name: Upload installable OpenStreetMap debug APK
         if: matrix.provider == 'openstreetmap'
         uses: actions/upload-artifact@v4
         with:
           name: family-stalker-android-debug
-          path: apps/android/app/build/outputs/apk/debug/app-debug.apk
+          path: apps/android/app/build/outputs/apk/osm/debug/app-osm-debug.apk
           if-no-files-found: error
